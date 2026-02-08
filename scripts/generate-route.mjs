@@ -623,11 +623,14 @@ function detectJunctionsAndStubs(nodes, adj, fullNodePath, gameRoute, routeLatLn
       }
       if (inRoundabout) continue;
 
+      // Vary length: 20-35 based on position for visual variety
+      const stubLen = 20 + Math.round(((Math.abs(fromGX * 7 + fromGZ * 13)) % 15));
+
       stubs.push({
         x: Math.round(fromGX * 10) / 10,
         z: Math.round(fromGZ * 10) / 10,
         angle: Math.round(angle * 1000) / 1000,
-        length: 25,
+        length: stubLen,
       });
     }
   }

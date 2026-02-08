@@ -24,6 +24,16 @@ export default function Road() {
       const cx = (a[0] + b[0]) / 2, cz = (a[1] + b[1]) / 2;
       const ang = Math.atan2(dx, dz);
 
+      // Suppress road segments fully inside a roundabout (prevent double asphalt)
+      let insideRoundabout = false;
+      for (const j of JUNCTIONS) {
+        if (Math.hypot(cx - j.x, cz - j.z) < j.radius - 4) {
+          insideRoundabout = true;
+          break;
+        }
+      }
+      if (insideRoundabout) continue;
+
       // Road surface
       items.push({ type: 'road', pos: [cx, 0.07, cz], rot: ang, size: [14, 0.15, len + 2] });
 
