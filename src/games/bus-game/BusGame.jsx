@@ -14,7 +14,7 @@ import Trees from './scene/Trees';
 import StreetLights from './scene/StreetLights';
 import BusStops from './scene/BusStops';
 import Bus from './scene/Bus';
-import Traffic from './scene/Traffic';
+
 import GameCamera from './scene/GameCamera';
 import GradientSky from './scene/GradientSky';
 import PostProcessing from './scene/PostProcessing';
@@ -79,7 +79,7 @@ export default function BusGame() {
           <BusStops obstaclesRef={obstaclesRef} />
           <Bus />
           <BusParticles />
-          <Traffic trafficRef={trafficRef} />
+
           <GameCamera />
           <PostProcessing />
           <GameController
