@@ -638,6 +638,17 @@ function nearRoad(px,pz,minDist){
   }
   return false;
 }
+/* smooth road curve from waypoints via Catmull-Rom spline */
+function generateSmoothRoad(waypoints){
+  var pts=[];
+  for(var i2=0;i2<waypoints.length;i2++)pts.push(new THREE.Vector3(waypoints[i2][0],0,waypoints[i2][1]));
+  var curve=new THREE.CatmullRomCurve3(pts,false,'centripetal');
+  var sampled=curve.getPoints((waypoints.length-1)*12);
+  var result=[];
+  for(var j2=0;j2<sampled.length;j2++)result.push([sampled[j2].x,sampled[j2].z]);
+  return result;
+}
+var smoothR=generateSmoothRoad(R);
 function newPax(){
   var p=[];
   for(var i=0;i<STOPS.length-1;i++){var c=1+Math.floor(Math.random()*3);
@@ -654,10 +665,12 @@ export default function App(){
   var stateRef=useRef("menu");
   var audioRef=useRef(null);
   var [ui,setUi]=useState({phase:"menu",spd:0,score:0,onBus:0,del:0,tot:0,
-    near:null,stopN:"",nextS:STOPS[0].n,prog:0,time:0,bOn:0,bOff:0,crashed:false,damage:0});
+    near:null,stopN:"",nextS:STOPS[0].n,prog:0,time:0,bOn:0,bOff:0,crashed:false,damage:0,mathPrev:0,mathSolved:true});
   var keysRef=useRef({});
   var gRef=useRef(null);
   var [muted,setMuted]=useState(false);
+  var [mathInput,setMathInput]=useState("");
+  var [mathWrong,setMathWrong]=useState(false);
 
   /* init audio on first interaction */
   function ensureAudio(){
@@ -752,22 +765,20 @@ export default function App(){
     var curbMat=new THREE.MeshStandardMaterial({color:0x777777,roughness:0.7});
     var roadGeos=[],swalkGeos=[],curbGeos=[],dashGeos=[],edgeGeos=[],arrowGeos=[];
 
-    for(i=0;i<R.length-1;i++){
-      a=R[i];b=R[i+1];dx=b[0]-a[0];dz=b[1]-a[1];
+    for(i=0;i<smoothR.length-1;i++){
+      a=smoothR[i];b=smoothR[i+1];dx=b[0]-a[0];dz=b[1]-a[1];
       len=Math.sqrt(dx*dx+dz*dz);cx=(a[0]+b[0])/2;cz=(a[1]+b[1])/2;ang=Math.atan2(dx,dz);
-      var rg=new THREE.BoxGeometry(14,0.15,len+2);rg.rotateY(ang);rg.translate(cx,0.07,cz);roadGeos.push(rg);
+      var rg=new THREE.BoxGeometry(14,0.15,len+0.5);rg.rotateY(ang);rg.translate(cx,0.07,cz);roadGeos.push(rg);
       for(s=-1;s<=1;s+=2){
-        var sg=new THREE.BoxGeometry(2.5,0.28,len+2);sg.rotateY(ang);
+        var sg=new THREE.BoxGeometry(2.5,0.28,len+0.5);sg.rotateY(ang);
         sg.translate(cx+Math.cos(ang)*s*8.5,0.14,cz-Math.sin(ang)*s*8.5);swalkGeos.push(sg);
-        var kg=new THREE.BoxGeometry(0.3,0.25,len+2);kg.rotateY(ang);
+        var kg=new THREE.BoxGeometry(0.3,0.25,len+0.5);kg.rotateY(ang);
         kg.translate(cx+Math.cos(ang)*s*7.2,0.12,cz-Math.sin(ang)*s*7.2);curbGeos.push(kg);
       }
-      var dc=Math.max(1,Math.floor(len/7));
-      for(d=0;d<dc;d++){t=(d+0.5)/dc;
-        var dg=new THREE.BoxGeometry(0.3,0.16,2.2);dg.rotateY(ang);
-        dg.translate(a[0]+dx*t,0.16,a[1]+dz*t);dashGeos.push(dg);}
+      if(i%3===0){var dg=new THREE.BoxGeometry(0.3,0.16,2.2);dg.rotateY(ang);
+        dg.translate(cx,0.16,cz);dashGeos.push(dg);}
       for(s=-1;s<=1;s+=2){
-        var eg=new THREE.BoxGeometry(0.2,0.16,len+1);eg.rotateY(ang);
+        var eg=new THREE.BoxGeometry(0.2,0.16,len+0.3);eg.rotateY(ang);
         eg.translate(cx+Math.cos(ang)*s*6,0.16,cz-Math.sin(ang)*s*6);edgeGeos.push(eg);}
     }
     for(i=0;i<R.length;i++){
@@ -775,10 +786,13 @@ export default function App(){
 
     /* route arrows */
     var arMat=new THREE.MeshStandardMaterial({color:0x00aaff,transparent:true,opacity:0.3,emissive:0x0066aa,emissiveIntensity:0.3});
-    for(i=0;i<R.length-1;i++){a=R[i];b=R[i+1];dx=b[0]-a[0];dz=b[1]-a[1];len=Math.sqrt(dx*dx+dz*dz);
-      var steps=Math.floor(len/14);for(d=0;d<steps;d++){t=(d+0.5)/steps;
+    var arDist=0;
+    for(i=0;i<smoothR.length-1;i++){
+      a=smoothR[i];b=smoothR[i+1];dx=b[0]-a[0];dz=b[1]-a[1];
+      var segL=Math.sqrt(dx*dx+dz*dz);arDist+=segL;
+      if(arDist>=14){arDist-=14;
         var ag=new THREE.ConeGeometry(0.5,1.2,4);ag.rotateX(Math.PI/2);ag.rotateZ(-Math.atan2(dx,dz));
-        ag.translate(a[0]+dx*t,0.25,a[1]+dz*t);arrowGeos.push(ag);}}
+        ag.translate(b[0],0.25,b[1]);arrowGeos.push(ag);}}
 
     /* merge road geometries into single meshes to reduce draw calls */
     var merged;
@@ -909,7 +923,7 @@ export default function App(){
     }
 
     /* ── BUS STOPS ── */
-    var stopRings=[];var waitFigs=[];
+    var stopRings=[];var waitFigs=[];var stopPositions=[];
     var pstMat=new THREE.MeshStandardMaterial({color:0x777777,roughness:0.4,metalness:0.5});
     var redMat=new THREE.MeshStandardMaterial({color:0xcc2222,roughness:0.5,metalness:0.1});
     var glassBlueMat=new THREE.MeshStandardMaterial({color:0x4488bb,roughness:0.15,metalness:0.3,transparent:true,opacity:0.45});
@@ -924,6 +938,7 @@ export default function App(){
       if(stop.i<R.length-1){var nxt=R[stop.i+1],ddx=nxt[0]-wp[0],ddz=nxt[1]-wp[1],ll=Math.sqrt(ddx*ddx+ddz*ddz);
         if(ll>0.01){nx=-ddz/ll;nz2=ddx/ll;}}
       var sx=wp[0]+nx*12,sz=wp[1]+nz2*12;
+      stopPositions.push({sx:sx,sz:sz,nx:nx,nz:nz2});
       /* shelter */
       for(var ox=-1.5;ox<=1.5;ox+=3){m=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,3.2,8),pstMat);m.position.set(sx+ox,1.6,sz);m.castShadow=true;scene.add(m);}
       m=new THREE.Mesh(new THREE.BoxGeometry(4,0.15,2.3),roofStopMat);m.position.set(sx,3.22,sz);m.castShadow=true;scene.add(m);
@@ -953,9 +968,26 @@ export default function App(){
         var fb=new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.28,1.1,8),bodyFig);fb.position.set(0,0.85,0);fg.add(fb);
         /* head */
         var fh=new THREE.Mesh(new THREE.SphereGeometry(0.22,8,6),headFig);fh.position.set(0,1.65,0);fg.add(fh);
-        fg.position.set(sx-1.2+fi*0.85,0,sz+0.5);fg.visible=false;scene.add(fg);figs.push(fg);
+        fg.position.set(sx-1.2+fi*0.85,0,sz+0.5);fg.visible=false;
+        fg.userData={walkState:"idle",walkProgress:0,walkStartX:0,walkStartZ:0,walkEndX:0,walkEndZ:0,walkSpeed:5,paxIndex:-1,homeX:sx-1.2+fi*0.85,homeZ:sz+0.5};
+        scene.add(fg);figs.push(fg);
       }
       waitFigs.push(figs);
+    }
+
+    /* alighting figure pool */
+    var alightFigs=[],alightFigPool=[];
+    function createAlightFig(){
+      if(alightFigPool.length>0){var fig=alightFigPool.pop();fig.visible=true;return fig;}
+      var fg2=new THREE.Group();
+      var fb2=new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.28,1.1,8),bodyFig);fb2.position.set(0,0.85,0);fg2.add(fb2);
+      var fh2=new THREE.Mesh(new THREE.SphereGeometry(0.22,8,6),headFig);fh2.position.set(0,1.65,0);fg2.add(fh2);
+      fg2.userData={walkState:"alighting",walkProgress:0,walkStartX:0,walkStartZ:0,walkEndX:0,walkEndZ:0,walkSpeed:5,paxIndex:-1};
+      scene.add(fg2);return fg2;
+    }
+    function recycleAlightFig(fig){
+      fig.visible=false;fig.userData.walkState="idle";fig.userData.walkProgress=0;
+      var idx=alightFigs.indexOf(fig);if(idx>=0)alightFigs.splice(idx,1);alightFigPool.push(fig);
     }
 
     /* ── MOUNTAINS (smoother) ── */
@@ -1061,7 +1093,8 @@ export default function App(){
       speed:0,heading:initAng,steer:0,pax:newPax(),onBus:0,delivered:0,score:0,
       nearIdx:-1,stoppedIdx:-1,time:0,nextWp:1,visited:{},
       crashed:false,crashTimer:0,damage:0,camShake:0,
-      prevX:R[0][0],prevZ:R[0][1],obstacles:obstacles
+      prevX:R[0][0],prevZ:R[0][1],obstacles:obstacles,
+      mathSolved:true,mathPrev:0
     };
     gRef.current=g;
 
@@ -1076,11 +1109,15 @@ export default function App(){
       g.pax=newPax();g.speed=0;g.steer=0;g.onBus=0;g.delivered=0;g.score=0;
       g.nearIdx=-1;g.stoppedIdx=-1;g.time=0;g.nextWp=1;g.visited={};
       g.crashed=false;g.crashTimer=0;g.damage=0;g.camShake=0;
+      g.mathSolved=true;g.mathPrev=0;
       g.prevX=R[0][0];g.prevZ=R[0][1];g.heading=initAng;
       bus.position.set(R[0][0],0,R[0][1]);bus.rotation.y=initAng;bus.rotation.z=0;bus.rotation.x=0;
+      for(var ai=alightFigs.length-1;ai>=0;ai--)recycleAlightFig(alightFigs[ai]);
       for(var ssi=0;ssi<STOPS.length;ssi++){var wwc=0;
         for(var ppi=0;ppi<g.pax.length;ppi++)if(g.pax[ppi].origin===ssi&&!g.pax[ppi].on&&!g.pax[ppi].done)wwc++;
-        for(var ffi=0;ffi<waitFigs[ssi].length;ffi++)waitFigs[ssi][ffi].visible=ffi<wwc;}
+        for(var ffi=0;ffi<waitFigs[ssi].length;ffi++){var wf=waitFigs[ssi][ffi];wf.visible=ffi<wwc;
+          wf.position.set(wf.userData.homeX,0,wf.userData.homeZ);wf.position.y=0;wf.rotation.y=0;
+          wf.userData.walkState="idle";wf.userData.walkProgress=0;wf.userData.paxIndex=-1;}}
     };
 
     g.door=function(){
@@ -1088,24 +1125,69 @@ export default function App(){
       if(st==="playing"&&g.nearIdx>=0&&Math.abs(g.speed)<2){
         g.speed=0;g.stoppedIdx=g.nearIdx;g.visited[g.nearIdx]=true;
         var ssi=g.nearIdx,bOff=0,bOn=0;
+        var previousOnBus=g.onBus;
         if(audioRef.current)audioRef.current.playDoor();
+        var sp=stopPositions[ssi];
+        var doorX=bus.position.x+sp.nx*2,doorZ=bus.position.z+sp.nz*2;
+        /* alighting — score immediately, animate walk to shelter */
         for(var ppi=0;ppi<g.pax.length;ppi++){var pp=g.pax[ppi];
-          if(pp.on&&pp.dest===ssi&&!pp.done){pp.done=true;pp.on=false;bOff++;g.delivered++;g.score+=100;}}
+          if(pp.on&&pp.dest===ssi&&!pp.done){
+            bOff++;g.delivered++;g.score+=100;
+            var af=createAlightFig();af.position.set(doorX,0,doorZ);
+            af.userData.walkState="alighting";af.userData.walkProgress=0;
+            af.userData.walkStartX=doorX;af.userData.walkStartZ=doorZ;
+            af.userData.walkEndX=sp.sx-1.2+bOff*0.85;af.userData.walkEndZ=sp.sz+0.5;
+            af.userData.walkSpeed=5;af.userData.paxIndex=ppi;alightFigs.push(af);}}
+        /* boarding — animate walk from shelter to bus door */
+        var bfi=0;
         for(var ppi2=0;ppi2<g.pax.length;ppi2++){var pp2=g.pax[ppi2];
-          if(pp2.origin===ssi&&!pp2.on&&!pp2.done){pp2.on=true;bOn++;}}
-        var cnt=0;for(var ppi3=0;ppi3<g.pax.length;ppi3++)if(g.pax[ppi3].on)cnt++;
-        g.onBus=cnt;
+          if(pp2.origin===ssi&&!pp2.on&&!pp2.done){bOn++;
+            while(bfi<waitFigs[ssi].length){var wf=waitFigs[ssi][bfi];bfi++;
+              if(wf.visible&&wf.userData.walkState==="idle"){
+                wf.userData.walkState="boarding";wf.userData.walkProgress=0;
+                wf.userData.walkStartX=wf.position.x;wf.userData.walkStartZ=wf.position.z;
+                wf.userData.walkEndX=doorX;wf.userData.walkEndZ=doorZ;
+                wf.userData.walkSpeed=5;wf.userData.paxIndex=ppi2;break;}}}}
         if(bOn>0&&audioRef.current)audioRef.current.playBell();
+        g.mathPrev=previousOnBus;
+        g.mathSolved=(bOn===0&&bOff===0);
+        setMathInput("");setMathWrong(false);
         if(ssi===STOPS.length-1){
+          /* terminal: finish animations instantly */
+          for(var ai3=alightFigs.length-1;ai3>=0;ai3--){
+            var af2=alightFigs[ai3],pi9=af2.userData.paxIndex;
+            if(pi9>=0){g.pax[pi9].done=true;g.pax[pi9].on=false;}recycleAlightFig(af2);}
+          for(var wi3=0;wi3<waitFigs[ssi].length;wi3++){var wf2=waitFigs[ssi][wi3];
+            if(wf2.userData.walkState==="boarding"){var pi10=wf2.userData.paxIndex;
+              if(pi10>=0)g.pax[pi10].on=true;wf2.visible=false;
+              wf2.position.set(wf2.userData.homeX,0,wf2.userData.homeZ);
+              wf2.userData.walkState="idle";wf2.userData.walkProgress=0;}}
+          var cnt=0;for(var ppi3=0;ppi3<g.pax.length;ppi3++)if(g.pax[ppi3].on)cnt++;
           var rem=0;for(var ppi4=0;ppi4<g.pax.length;ppi4++)if(g.pax[ppi4].on&&!g.pax[ppi4].done)rem++;
           g.score-=rem*50;g.onBus=0;stateRef.current="complete";
           setUi({phase:"complete",spd:0,score:g.score,onBus:0,del:g.delivered,tot:g.pax.length,
-            near:null,stopN:"",nextS:"",prog:1,time:g.time,bOn:bOn,bOff:bOff,crashed:false,damage:g.damage});return;}
+            near:null,stopN:"",nextS:"",prog:1,time:g.time,bOn:bOn,bOff:bOff,crashed:false,damage:g.damage,mathPrev:0,mathSolved:true});return;}
+        var cnt2=0;for(var ppi5=0;ppi5<g.pax.length;ppi5++)if(g.pax[ppi5].on)cnt2++;
+        g.onBus=cnt2;
         stateRef.current="stopped";
         setUi(function(prev){return{phase:"stopped",spd:0,score:g.score,onBus:g.onBus,del:g.delivered,
-          tot:g.pax.length,near:null,stopN:STOPS[ssi].n,nextS:prev.nextS,prog:prev.prog,time:g.time,bOn:bOn,bOff:bOff,crashed:false,damage:g.damage};});
+          tot:g.pax.length,near:null,stopN:STOPS[ssi].n,nextS:prev.nextS,prog:prev.prog,time:g.time,bOn:bOn,bOff:bOff,crashed:false,damage:g.damage,
+          mathPrev:previousOnBus,mathSolved:(bOn===0&&bOff===0)};});
       }else if(st==="stopped"){
+        if(!g.mathSolved)return;
         if(audioRef.current)audioRef.current.playDoor();
+        /* finish any remaining walk animations instantly */
+        var ssi2=g.stoppedIdx;
+        if(ssi2>=0){
+          for(var wi4=0;wi4<waitFigs[ssi2].length;wi4++){var wf3=waitFigs[ssi2][wi4];
+            if(wf3.userData.walkState==="boarding"){var pi11=wf3.userData.paxIndex;
+              if(pi11>=0)g.pax[pi11].on=true;wf3.visible=false;
+              wf3.position.set(wf3.userData.homeX,0,wf3.userData.homeZ);
+              wf3.userData.walkState="idle";wf3.userData.walkProgress=0;}}
+          for(var ai4=alightFigs.length-1;ai4>=0;ai4--){var af3=alightFigs[ai4],pi12=af3.userData.paxIndex;
+            if(pi12>=0){g.pax[pi12].done=true;g.pax[pi12].on=false;}recycleAlightFig(af3);}
+          var cnt3=0;for(var ppi6=0;ppi6<g.pax.length;ppi6++)if(g.pax[ppi6].on)cnt3++;
+          g.onBus=cnt3;}
         g.stoppedIdx=-1;stateRef.current="playing";
         setUi(function(prev){return Object.assign({},prev,{phase:"playing",stopN:""});});
       }
@@ -1213,13 +1295,43 @@ export default function App(){
 
         setUi({phase:"playing",spd:Math.abs(g.speed),score:g.score,onBus:g.onBus,del:g.delivered,
           tot:g.pax.length,near:g.nearIdx>=0?STOPS[g.nearIdx].n:null,stopN:"",nextS:nsn,
-          prog:g.nextWp/(R.length-1),time:g.time,bOn:0,bOff:0,crashed:g.crashed,damage:g.damage});
+          prog:g.nextWp/(R.length-1),time:g.time,bOn:0,bOff:0,crashed:g.crashed,damage:g.damage,mathPrev:g.mathPrev,mathSolved:g.mathSolved});
       }
 
-      /* update wait figs */
+      /* update wait figs and walk animations */
       for(var ssi4=0;ssi4<STOPS.length;ssi4++){var wwc2=0;
         for(var ppi5=0;ppi5<g.pax.length;ppi5++)if(g.pax[ppi5].origin===ssi4&&!g.pax[ppi5].on&&!g.pax[ppi5].done)wwc2++;
-        for(var ffi2=0;ffi2<waitFigs[ssi4].length;ffi2++)waitFigs[ssi4][ffi2].visible=ffi2<wwc2;}
+        var bc4=0;
+        for(var ffi2=0;ffi2<waitFigs[ssi4].length;ffi2++){var wfig=waitFigs[ssi4][ffi2];
+          if(wfig.userData.walkState==="boarding"){bc4++;
+            var wd=dd(wfig.userData.walkStartX,wfig.userData.walkStartZ,wfig.userData.walkEndX,wfig.userData.walkEndZ);
+            wfig.userData.walkProgress+=dt*wfig.userData.walkSpeed/Math.max(wd,0.1);
+            if(wfig.userData.walkProgress>=1){var pidx=wfig.userData.paxIndex;
+              if(pidx>=0)g.pax[pidx].on=true;wfig.visible=false;
+              wfig.position.set(wfig.userData.homeX,0,wfig.userData.homeZ);wfig.position.y=0;wfig.rotation.y=0;
+              wfig.userData.walkState="idle";wfig.userData.walkProgress=0;wfig.userData.paxIndex=-1;
+              var cn=0;for(var pk=0;pk<g.pax.length;pk++)if(g.pax[pk].on)cn++;g.onBus=cn;
+            }else{var pr=wfig.userData.walkProgress;
+              wfig.position.x=wfig.userData.walkStartX+(wfig.userData.walkEndX-wfig.userData.walkStartX)*pr;
+              wfig.position.z=wfig.userData.walkStartZ+(wfig.userData.walkEndZ-wfig.userData.walkStartZ)*pr;
+              wfig.position.y=Math.sin(pr*Math.PI*4)*0.08;
+              wfig.rotation.y=Math.atan2(wfig.userData.walkEndX-wfig.userData.walkStartX,wfig.userData.walkEndZ-wfig.userData.walkStartZ);}}}
+        var idleShow=wwc2-bc4,shown=0;
+        for(var ffi3=0;ffi3<waitFigs[ssi4].length;ffi3++){var wf4=waitFigs[ssi4][ffi3];
+          if(wf4.userData.walkState==="idle"){wf4.visible=shown<idleShow;shown++;}}}
+      /* animate alighting figures */
+      for(var ai5=alightFigs.length-1;ai5>=0;ai5--){var afig=alightFigs[ai5];
+        var ad=dd(afig.userData.walkStartX,afig.userData.walkStartZ,afig.userData.walkEndX,afig.userData.walkEndZ);
+        afig.userData.walkProgress+=dt*afig.userData.walkSpeed/Math.max(ad,0.1);
+        if(afig.userData.walkProgress>=1){var pidx2=afig.userData.paxIndex;
+          if(pidx2>=0){g.pax[pidx2].done=true;g.pax[pidx2].on=false;}
+          recycleAlightFig(afig);
+          var cn2=0;for(var pk2=0;pk2<g.pax.length;pk2++)if(g.pax[pk2].on)cn2++;g.onBus=cn2;
+        }else{var pr2=afig.userData.walkProgress;
+          afig.position.x=afig.userData.walkStartX+(afig.userData.walkEndX-afig.userData.walkStartX)*pr2;
+          afig.position.z=afig.userData.walkStartZ+(afig.userData.walkEndZ-afig.userData.walkStartZ)*pr2;
+          afig.position.y=Math.sin(pr2*Math.PI*4)*0.08;
+          afig.rotation.y=Math.atan2(afig.userData.walkEndX-afig.userData.walkStartX,afig.userData.walkEndZ-afig.userData.walkStartZ);}}
 
       /* pulse stop rings */
       var pt2=performance.now()*0.003;
@@ -1270,6 +1382,21 @@ export default function App(){
     if(audioRef.current){var m2=!audioRef.current.getMuted();audioRef.current.setMute(m2);setMuted(m2);}
   },[]);
 
+  function checkMath(){
+    var g2=gRef.current;if(!g2)return;
+    var answer=parseInt(mathInput,10);
+    var correct=ui.mathPrev-ui.bOff+ui.bOn;
+    if(answer===correct){
+      g2.mathSolved=true;
+      if(audioRef.current)audioRef.current.playBell();
+      setUi(function(prev){return Object.assign({},prev,{mathSolved:true});});
+      setMathInput("");setMathWrong(false);
+    }else{
+      setMathWrong(true);
+      setTimeout(function(){setMathWrong(false);},600);
+    }
+  }
+
   var tS=function(k){keysRef.current[k]=true;};
   var tE=function(k){keysRef.current[k]=false;};
   var phase=ui.phase;
@@ -1281,6 +1408,7 @@ export default function App(){
 
   return(
     <div style={{width:"100%",height:"100vh",background:"#000",position:"relative",overflow:"hidden",fontFamily:"'Courier New',monospace"}}>
+      <style>{`@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}50%{transform:translateX(6px)}75%{transform:translateX(-4px)}}`}</style>
       <div ref={canvasRef} style={{width:"100%",height:"100%",position:"absolute",top:0,left:0,
         filter:phase==="menu"?"blur(3px) brightness(0.35)":phase==="complete"?"blur(4px) brightness(0.3)":"none",
         transition:"filter 0.5s"}} />
@@ -1377,7 +1505,7 @@ export default function App(){
               <div style={{color:"#e8b400",fontSize:19,fontWeight:"bold"}}>{ui.score}</div>
               <div style={{color:"#555",fontSize:9,letterSpacing:2}}>SCORE</div>
               <div style={{display:"flex",justifyContent:"flex-end",gap:12,marginTop:6}}>
-                <div><div style={{color:"#f39c12",fontSize:14,fontWeight:"bold"}}>{ui.onBus}</div><div style={{color:"#555",fontSize:8}}>ON BUS</div></div>
+                <div><div style={{color:"#f39c12",fontSize:18,fontWeight:"bold"}}>🚌 {ui.onBus}</div><div style={{color:"#777",fontSize:9}}>ON BUS</div></div>
                 <div><div style={{color:"#2ecc71",fontSize:14,fontWeight:"bold"}}>{ui.del}</div><div style={{color:"#555",fontSize:8}}>DONE</div></div>
               </div>
               <div style={{color:"#333",fontSize:9,marginTop:5}}>{Math.floor(ui.time)}s</div>
@@ -1411,15 +1539,50 @@ export default function App(){
 
           {phase==="stopped"&&(
             <div style={{position:"absolute",bottom:75,left:"50%",transform:"translateX(-50%)",
-              background:"rgba(0,0,0,0.85)",borderRadius:13,padding:"16px 30px",border:"2px solid #2ecc71",
-              textAlign:"center",minWidth:240,backdropFilter:"blur(8px)"}}>
-              <div style={{color:"#2ecc71",fontSize:15,fontWeight:"bold",marginBottom:7}}>🚏 {ui.stopN}</div>
-              <div style={{display:"flex",justifyContent:"center",gap:24,marginBottom:8}}>
-                {ui.bOff>0&&<div><div style={{color:"#e74c3c",fontSize:17,fontWeight:"bold"}}>↓ {ui.bOff}</div><div style={{color:"#777",fontSize:9}}>ALIGHTING</div></div>}
-                {ui.bOn>0&&<div><div style={{color:"#2ecc71",fontSize:17,fontWeight:"bold"}}>↑ {ui.bOn}</div><div style={{color:"#777",fontSize:9}}>BOARDING</div></div>}
-                {ui.bOff===0&&ui.bOn===0&&<div style={{color:"#777",fontSize:11}}>No passengers here</div>}
-              </div>
-              <div style={{color:"#e8b400",fontSize:10}}>Press SPACE to close doors &amp; continue</div>
+              background:"rgba(0,0,0,0.9)",borderRadius:13,padding:"18px 30px",
+              border:ui.mathSolved?"2px solid #2ecc71":"2px solid #e8b400",
+              textAlign:"center",minWidth:260,backdropFilter:"blur(8px)",pointerEvents:"auto"}}>
+              <div style={{color:"#2ecc71",fontSize:15,fontWeight:"bold",marginBottom:10}}>🚏 {ui.stopN}</div>
+              {ui.bOff===0&&ui.bOn===0?(
+                <div>
+                  <div style={{color:"#777",fontSize:12,marginBottom:8}}>No passengers here</div>
+                  <div style={{color:"#e8b400",fontSize:11}}>Press SPACE to close doors</div>
+                </div>
+              ):!ui.mathSolved?(
+                <div>
+                  <div style={{color:"#aac",fontSize:13,marginBottom:6}}>🚌 You had <span style={{color:"#f39c12",fontWeight:"bold",fontSize:16}}>{ui.mathPrev}</span> on the bus</div>
+                  <div style={{display:"flex",justifyContent:"center",gap:20,marginBottom:10}}>
+                    {ui.bOff>0&&<div style={{color:"#e74c3c",fontSize:15,fontWeight:"bold"}}>⬇ {ui.bOff} got off</div>}
+                    {ui.bOn>0&&<div style={{color:"#2ecc71",fontSize:15,fontWeight:"bold"}}>⬆ {ui.bOn} got on</div>}
+                  </div>
+                  <div style={{color:"#e8b400",fontSize:14,fontWeight:"bold",marginBottom:8}}>How many are on the bus now?</div>
+                  <div style={{display:"flex",justifyContent:"center",gap:8,alignItems:"center"}}>
+                    <input type="number" inputMode="numeric" pattern="[0-9]*" value={mathInput}
+                      onChange={function(e){setMathInput(e.target.value);}}
+                      onKeyDown={function(e){e.stopPropagation();if(e.key==="Enter")checkMath();}}
+                      autoFocus
+                      style={{width:64,padding:"8px 10px",fontSize:20,fontWeight:"bold",textAlign:"center",
+                        borderRadius:8,border:mathWrong?"2px solid #e74c3c":"2px solid #e8b400",
+                        background:"rgba(255,255,255,0.1)",color:"#fff",outline:"none",
+                        fontFamily:"'Courier New',monospace",
+                        animation:mathWrong?"shake 0.4s ease":"none"}} />
+                    <button onClick={checkMath} style={{padding:"8px 16px",fontSize:14,fontWeight:"bold",
+                      borderRadius:8,border:"none",cursor:"pointer",
+                      background:"linear-gradient(135deg,#e8b400,#ff6b00)",color:"#111",
+                      fontFamily:"'Courier New',monospace"}}>Check</button>
+                  </div>
+                  {mathWrong&&<div style={{color:"#e74c3c",fontSize:12,marginTop:6}}>Not quite! Try again</div>}
+                </div>
+              ):(
+                <div>
+                  <div style={{display:"flex",justifyContent:"center",gap:20,marginBottom:6}}>
+                    {ui.bOff>0&&<div style={{color:"#e74c3c",fontSize:15,fontWeight:"bold"}}>⬇ {ui.bOff} got off</div>}
+                    {ui.bOn>0&&<div style={{color:"#2ecc71",fontSize:15,fontWeight:"bold"}}>⬆ {ui.bOn} got on</div>}
+                  </div>
+                  <div style={{color:"#2ecc71",fontSize:16,fontWeight:"bold",marginBottom:6}}>Correct! {ui.mathPrev-ui.bOff+ui.bOn} passengers on the bus</div>
+                  <div style={{color:"#e8b400",fontSize:11}}>Press SPACE to close doors &amp; continue</div>
+                </div>
+              )}
             </div>
           )}
 
