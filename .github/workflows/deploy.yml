@@ -1,0 +1,129 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  APP_NAME: games
+  VPS_HOST: 72.61.16.250
+  PROD_DOMAIN: games.tony.codes
+
+jobs:
+  deploy:
+    name: Build and Deploy to Production
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set image tag
+        run: |
+          echo "GIT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "IMAGE_TAG=${{ env.APP_NAME }}:$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+          echo "BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_ENV
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "Host ${{ env.VPS_HOST }}" > ~/.ssh/config
+          echo "  StrictHostKeyChecking no" >> ~/.ssh/config
+          echo "  UserKnownHostsFile=/dev/null" >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Pull latest code on VPS
+        run: |
+          ssh root@${{ env.VPS_HOST }} "cd /root/apps/${{ env.APP_NAME }} && git fetch origin main && git reset --hard origin/main"
+
+      - name: Deploy on VPS
+        run: |
+          ssh root@${{ env.VPS_HOST }} << EOF
+            set -e
+            cd /root/apps/${{ env.APP_NAME }}
+
+            # Build with git SHA tag
+            echo "Building image: ${{ env.IMAGE_TAG }}"
+            docker build --no-cache --pull \
+              --build-arg GIT_SHA=${{ env.GIT_SHA }} \
+              --build-arg BUILD_TIME=${{ env.BUILD_TIME }} \
+              -t ${{ env.IMAGE_TAG }} .
+
+            docker tag ${{ env.IMAGE_TAG }} ${{ env.APP_NAME }}:latest
+
+            # Update or create service
+            if docker service inspect prod_${{ env.APP_NAME }} >/dev/null 2>&1; then
+              echo "Updating service..."
+              docker service update \
+                --image ${{ env.IMAGE_TAG }} \
+                --update-parallelism 1 \
+                --update-delay 10s \
+                --update-failure-action rollback \
+                prod_${{ env.APP_NAME }}
+            else
+              echo "Creating service..."
+              docker service create \
+                --name prod_${{ env.APP_NAME }} \
+                --network prod_traefik-public \
+                --replicas 1 \
+                --update-parallelism 1 \
+                --update-delay 10s \
+                --update-failure-action rollback \
+                ${{ env.IMAGE_TAG }}
+            fi
+
+            # Wait for rollout
+            echo "Waiting for rollout..."
+            timeout 120 sh -c 'until docker service ps prod_${{ env.APP_NAME }} --filter "desired-state=running" --format "{{.CurrentState}}" | grep -q "Running"; do sleep 5; done'
+
+            # Show deployment info
+            echo ""
+            echo "=== Deployment Complete ==="
+            echo "Image: ${{ env.IMAGE_TAG }}"
+            echo "Commit: ${{ env.GIT_SHA }}"
+            docker service ps prod_${{ env.APP_NAME }} --format "table {{.Name}}\t{{.Image}}\t{{.CurrentState}}"
+
+            # Cleanup old images (keep last 3)
+            echo ""
+            echo "Cleaning up old images..."
+            docker images ${{ env.APP_NAME }} --format "{{.Tag}}" | tail -n +4 | xargs -r -I {} docker rmi ${{ env.APP_NAME }}:{} 2>/dev/null || true
+          EOF
+
+      - name: Verify deployment
+        run: |
+          echo "Verifying deployment..."
+          sleep 10
+          HEALTH_RESPONSE=$(curl -sf https://${{ env.PROD_DOMAIN }}/health.json 2>/dev/null || echo "")
+
+          if [ -z "$HEALTH_RESPONSE" ]; then
+            echo "Health endpoint not responding"
+            exit 1
+          fi
+
+          echo "Health response: $HEALTH_RESPONSE"
+
+          DEPLOYED_COMMIT=$(echo "$HEALTH_RESPONSE" | jq -r '.build.commit // empty' 2>/dev/null || echo "")
+          if [ "$DEPLOYED_COMMIT" = "${{ env.GIT_SHA }}" ]; then
+            echo "Commit verified!"
+          else
+            echo "Commit mismatch - may still be rolling out"
+          fi
+
+          echo "Deployment verified!"
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "Deployment failed!"
+          echo "Manual recovery:"
+          echo "  ssh root@${{ env.VPS_HOST }}"
+          echo "  docker service logs prod_${{ env.APP_NAME }} --tail 50"
+          echo "  docker service rollback prod_${{ env.APP_NAME }}"
+          exit 1
