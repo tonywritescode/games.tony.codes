@@ -99,11 +99,17 @@ jobs:
       - name: Verify deployment
         run: |
           echo "Verifying deployment..."
-          sleep 10
-          HEALTH_RESPONSE=$(curl -sf https://${{ env.PROD_DOMAIN }}/health.json 2>/dev/null || echo "")
+          for i in $(seq 1 6); do
+            sleep 10
+            HEALTH_RESPONSE=$(curl -sf https://${{ env.PROD_DOMAIN }}/health.json 2>/dev/null || echo "")
+            if [ -n "$HEALTH_RESPONSE" ]; then
+              break
+            fi
+            echo "Attempt $i: health endpoint not ready, retrying..."
+          done
 
           if [ -z "$HEALTH_RESPONSE" ]; then
-            echo "Health endpoint not responding"
+            echo "Health endpoint not responding after 60s"
             exit 1
           fi
 
