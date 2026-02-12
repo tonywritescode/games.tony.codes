@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { ROUTE, STOPS } from '../data/routeData';
+import { ROUTE, STOPS, BOUNDS } from '../data/routeData';
 import { dd } from '../data/mathUtils';
 import { useBusGameStore } from '../store/busGameStore';
 import { checkBusObstacleCollision, checkBusTrafficCollision } from './CollisionSystem';
@@ -59,8 +59,7 @@ export default function GameController({ keysRef, audioRef, obstaclesRef, traffi
     posX -= Math.sin(heading) * speed * dt;
     posZ -= Math.cos(heading) * speed * dt;
 
-    // Map boundary (route spans X:0-200, Z:-120 to 120, plus padding)
-    const BOUNDS = { minX: -60, maxX: 260, minZ: -180, maxZ: 180 };
+    // Map boundary
     let hitBoundary = false;
     if (posX < BOUNDS.minX) { posX = BOUNDS.minX; hitBoundary = true; }
     if (posX > BOUNDS.maxX) { posX = BOUNDS.maxX; hitBoundary = true; }

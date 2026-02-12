@@ -1,13 +1,17 @@
 import { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { ROUTE } from '../data/routeData';
+import { ROUTE, BOUNDS } from '../data/routeData';
 import { ptSegDist } from '../data/mathUtils';
 import { createGrassTexture } from './proceduralTextures';
 
+const GROUND_SIZE = Math.max(BOUNDS.maxX - BOUNDS.minX, BOUNDS.maxZ - BOUNDS.minZ) * 1.5;
+const GROUND_CENTER_X = (BOUNDS.minX + BOUNDS.maxX) / 2;
+const GROUND_CENTER_Z = (BOUNDS.minZ + BOUNDS.maxZ) / 2;
+
 function Ground() {
   const geo = useMemo(() => {
-    const g = new THREE.PlaneGeometry(800, 800, 80, 80);
+    const g = new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE, 80, 80);
     const verts = g.attributes.position;
     for (let vi = 0; vi < verts.count; vi++) {
       const gx = verts.getX(vi), gy = verts.getY(vi);
@@ -32,12 +36,14 @@ function Ground() {
   );
 }
 
+const MOUNTAIN_RADIUS = GROUND_SIZE * 0.4;
+
 function Mountains() {
   const mountains = useMemo(() => {
     const items = [];
     for (let i = 0; i < 14; i++) {
       const aa = (i / 14) * Math.PI * 2;
-      const rr = 320 + Math.random() * 60;
+      const rr = MOUNTAIN_RADIUS + Math.random() * 60;
       const hh = 30 + Math.random() * 50;
       const radius = 32 + Math.random() * 22;
       items.push({ aa, rr, hh, radius, hasSnow: hh > 45 });
@@ -49,12 +55,12 @@ function Mountains() {
     <group>
       {mountains.map((mt, i) => (
         <group key={i}>
-          <mesh position={[Math.cos(mt.aa) * mt.rr + 100, mt.hh / 2 - 4, Math.sin(mt.aa) * mt.rr]}>
+          <mesh position={[Math.cos(mt.aa) * mt.rr + GROUND_CENTER_X, mt.hh / 2 - 4, Math.sin(mt.aa) * mt.rr + GROUND_CENTER_Z]}>
             <coneGeometry args={[mt.radius, mt.hh, 6]} />
             <meshStandardMaterial color={0x667788} roughness={0.9} metalness={0} transparent opacity={0.45} />
           </mesh>
           {mt.hasSnow && (
-            <mesh position={[Math.cos(mt.aa) * mt.rr + 100, mt.hh * 0.9, Math.sin(mt.aa) * mt.rr]}>
+            <mesh position={[Math.cos(mt.aa) * mt.rr + GROUND_CENTER_X, mt.hh * 0.9, Math.sin(mt.aa) * mt.rr + GROUND_CENTER_Z]}>
               <coneGeometry args={[10, mt.hh * 0.2, 6]} />
               <meshStandardMaterial color={0xeeeeff} roughness={0.8} metalness={0} transparent opacity={0.5} />
             </mesh>
@@ -80,7 +86,7 @@ function Clouds() {
         });
       }
       items.push({
-        pos: [-250 + Math.random() * 700, 52 + Math.random() * 45, -250 + Math.random() * 500],
+        pos: [BOUNDS.minX + Math.random() * (BOUNDS.maxX - BOUNDS.minX), 52 + Math.random() * 45, BOUNDS.minZ + Math.random() * (BOUNDS.maxZ - BOUNDS.minZ)],
         puffs,
         speedMul: 0.5 + i * 0.05,
       });
@@ -95,7 +101,7 @@ function Clouds() {
       const g = groupRefs.current[i];
       if (!g) continue;
       g.position.x += dt * cloudData[i].speedMul;
-      if (g.position.x > 450) g.position.x = -350;
+      if (g.position.x > BOUNDS.maxX + 100) g.position.x = BOUNDS.minX - 100;
     }
   });
 
@@ -123,15 +129,15 @@ export default function Environment() {
       <directionalLight
         color={0xfff0d4}
         intensity={1.15}
-        position={[100, 160, 80]}
+        position={[GROUND_CENTER_X + 100, 160, GROUND_CENTER_Z + 80]}
         castShadow
         shadow-mapSize={[2048, 2048]}
-        shadow-camera-left={-200}
-        shadow-camera-right={200}
-        shadow-camera-top={200}
-        shadow-camera-bottom={-200}
+        shadow-camera-left={-GROUND_SIZE / 2}
+        shadow-camera-right={GROUND_SIZE / 2}
+        shadow-camera-top={GROUND_SIZE / 2}
+        shadow-camera-bottom={-GROUND_SIZE / 2}
         shadow-camera-near={10}
-        shadow-camera-far={400}
+        shadow-camera-far={GROUND_SIZE}
         shadow-bias={-0.0005}
         shadow-normalBias={0.02}
       />
