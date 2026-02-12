@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import * as THREE from "three";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 /* ═══════════════════════════════════════════
    AUDIO ENGINE - Realistic Diesel Bus + Music
@@ -710,9 +711,9 @@ export default function App(){
     var sun=new THREE.DirectionalLight(0xfff0d4,1.15);
     sun.position.set(100,160,80);
     sun.castShadow=true;
-    sun.shadow.mapSize.set(2048,2048);
-    sun.shadow.camera.left=-200;sun.shadow.camera.right=200;
-    sun.shadow.camera.top=200;sun.shadow.camera.bottom=-200;
+    sun.shadow.mapSize.set(1024,1024);
+    sun.shadow.camera.left=-150;sun.shadow.camera.right=150;
+    sun.shadow.camera.top=150;sun.shadow.camera.bottom=-150;
     sun.shadow.camera.near=10;sun.shadow.camera.far=400;
     sun.shadow.bias=-0.0005;
     sun.shadow.normalBias=0.02;
@@ -747,40 +748,46 @@ export default function App(){
     var swalkMat=new THREE.MeshStandardMaterial({color:0x8a8a8a,roughness:0.75,metalness:0.02});
     var dashMat=new THREE.MeshStandardMaterial({color:0xcccc44,roughness:0.5,emissive:0x333300,emissiveIntensity:0.1});
     var edgeMat=new THREE.MeshStandardMaterial({color:0xdddddd,roughness:0.6});
-    var i,a,b,dx,dz,len,cx,cz,ang,m,s;
+    var i,a,b,dx,dz,len,cx,cz,ang,m,s,d,t;
+    var curbMat=new THREE.MeshStandardMaterial({color:0x777777,roughness:0.7});
+    var roadGeos=[],swalkGeos=[],curbGeos=[],dashGeos=[],edgeGeos=[],arrowGeos=[];
 
     for(i=0;i<R.length-1;i++){
       a=R[i];b=R[i+1];dx=b[0]-a[0];dz=b[1]-a[1];
       len=Math.sqrt(dx*dx+dz*dz);cx=(a[0]+b[0])/2;cz=(a[1]+b[1])/2;ang=Math.atan2(dx,dz);
-      m=new THREE.Mesh(new THREE.BoxGeometry(14,0.15,len+2),roadMat);
-      m.position.set(cx,0.07,cz);m.rotation.y=ang;m.receiveShadow=true;scene.add(m);
+      var rg=new THREE.BoxGeometry(14,0.15,len+2);rg.rotateY(ang);rg.translate(cx,0.07,cz);roadGeos.push(rg);
       for(s=-1;s<=1;s+=2){
-        m=new THREE.Mesh(new THREE.BoxGeometry(2.5,0.28,len+2),swalkMat);
-        m.position.set(cx+Math.cos(ang)*s*8.5,0.14,cz-Math.sin(ang)*s*8.5);
-        m.rotation.y=ang;m.receiveShadow=true;m.castShadow=true;scene.add(m);
-        /* curb */
-        m=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.25,len+2),new THREE.MeshStandardMaterial({color:0x777777,roughness:0.7}));
-        m.position.set(cx+Math.cos(ang)*s*7.2,0.12,cz-Math.sin(ang)*s*7.2);
-        m.rotation.y=ang;scene.add(m);
+        var sg=new THREE.BoxGeometry(2.5,0.28,len+2);sg.rotateY(ang);
+        sg.translate(cx+Math.cos(ang)*s*8.5,0.14,cz-Math.sin(ang)*s*8.5);swalkGeos.push(sg);
+        var kg=new THREE.BoxGeometry(0.3,0.25,len+2);kg.rotateY(ang);
+        kg.translate(cx+Math.cos(ang)*s*7.2,0.12,cz-Math.sin(ang)*s*7.2);curbGeos.push(kg);
       }
-      var dc=Math.floor(len/7),d,t;
+      var dc=Math.max(1,Math.floor(len/7));
       for(d=0;d<dc;d++){t=(d+0.5)/dc;
-        m=new THREE.Mesh(new THREE.BoxGeometry(0.3,0.16,2.2),dashMat);
-        m.position.set(a[0]+dx*t,0.16,a[1]+dz*t);m.rotation.y=ang;scene.add(m);}
+        var dg=new THREE.BoxGeometry(0.3,0.16,2.2);dg.rotateY(ang);
+        dg.translate(a[0]+dx*t,0.16,a[1]+dz*t);dashGeos.push(dg);}
       for(s=-1;s<=1;s+=2){
-        m=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.16,len+1),edgeMat);
-        m.position.set(cx+Math.cos(ang)*s*6,0.16,cz-Math.sin(ang)*s*6);m.rotation.y=ang;scene.add(m);}
+        var eg=new THREE.BoxGeometry(0.2,0.16,len+1);eg.rotateY(ang);
+        eg.translate(cx+Math.cos(ang)*s*6,0.16,cz-Math.sin(ang)*s*6);edgeGeos.push(eg);}
     }
     for(i=0;i<R.length;i++){
-      m=new THREE.Mesh(new THREE.CylinderGeometry(7,7,0.15,16),roadMat);
-      m.position.set(R[i][0],0.07,R[i][1]);m.receiveShadow=true;scene.add(m);}
+      var jg=new THREE.CylinderGeometry(7,7,0.15,16);jg.translate(R[i][0],0.07,R[i][1]);roadGeos.push(jg);}
 
     /* route arrows */
     var arMat=new THREE.MeshStandardMaterial({color:0x00aaff,transparent:true,opacity:0.3,emissive:0x0066aa,emissiveIntensity:0.3});
     for(i=0;i<R.length-1;i++){a=R[i];b=R[i+1];dx=b[0]-a[0];dz=b[1]-a[1];len=Math.sqrt(dx*dx+dz*dz);
       var steps=Math.floor(len/14);for(d=0;d<steps;d++){t=(d+0.5)/steps;
-        m=new THREE.Mesh(new THREE.ConeGeometry(0.5,1.2,4),arMat);
-        m.position.set(a[0]+dx*t,0.25,a[1]+dz*t);m.rotation.x=Math.PI/2;m.rotation.z=-Math.atan2(dx,dz);scene.add(m);}}
+        var ag=new THREE.ConeGeometry(0.5,1.2,4);ag.rotateX(Math.PI/2);ag.rotateZ(-Math.atan2(dx,dz));
+        ag.translate(a[0]+dx*t,0.25,a[1]+dz*t);arrowGeos.push(ag);}}
+
+    /* merge road geometries into single meshes to reduce draw calls */
+    var merged;
+    merged=mergeGeometries(roadGeos);if(merged){m=new THREE.Mesh(merged,roadMat);m.receiveShadow=true;scene.add(m);}
+    merged=mergeGeometries(swalkGeos);if(merged){m=new THREE.Mesh(merged,swalkMat);m.receiveShadow=true;m.castShadow=true;scene.add(m);}
+    merged=mergeGeometries(curbGeos);if(merged){m=new THREE.Mesh(merged,curbMat);scene.add(m);}
+    merged=mergeGeometries(dashGeos);if(merged){m=new THREE.Mesh(merged,dashMat);scene.add(m);}
+    merged=mergeGeometries(edgeGeos);if(merged){m=new THREE.Mesh(merged,edgeMat);scene.add(m);}
+    merged=mergeGeometries(arrowGeos);if(merged){m=new THREE.Mesh(merged,arMat);scene.add(m);}
 
     /* ── BUILDINGS (PBR materials) ── */
     var obstacles=[];
@@ -801,7 +808,7 @@ export default function App(){
     var placed=[];
 
     function canPlace(bx,bz2){
-      if(nearRoad(bx,bz2,18))return false;
+      if(nearRoad(bx,bz2,24))return false;
       for(var ii2=0;ii2<placed.length;ii2++)if(dd(bx,bz2,placed[ii2][0],placed[ii2][1])<13)return false;
       return true;
     }
@@ -968,9 +975,9 @@ export default function App(){
     /* ── CLOUDS (volumetric-ish) ── */
     var cldMat=new THREE.MeshStandardMaterial({color:0xffffff,roughness:1,metalness:0,transparent:true,opacity:0.55});
     var clouds=[];
-    for(i=0;i<15;i++){
+    for(i=0;i<8;i++){
       var cg=new THREE.Group();
-      var numPuffs=3+Math.floor(Math.random()*4);
+      var numPuffs=2+Math.floor(Math.random()*2);
       for(var j=0;j<numPuffs;j++){
         var puffSize=4+Math.random()*7;
         var cs=new THREE.Mesh(new THREE.SphereGeometry(puffSize,8,6),cldMat);
@@ -1295,6 +1302,8 @@ export default function App(){
         var hit=false;
         for(var oi=0;oi<obstacles.length;oi++){
           var ob=obstacles[oi];
+          /* broad-phase: skip obstacles far from bus */
+          if(dd(bxp,bzp,ob.x,ob.z)>30)continue;
           if(ob.r!==undefined){
             var hitR=ob.r+2.0;
             for(var pi2=0;pi2<testPts.length;pi2++){if(dd(testPts[pi2].x,testPts[pi2].z,ob.x,ob.z)<hitR){hit=true;break;}}
