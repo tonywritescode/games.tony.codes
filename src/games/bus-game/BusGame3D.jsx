@@ -599,10 +599,40 @@ function createAudio(){
     h1.connect(hf);h2.connect(hf);hf.connect(hg);hg.connect(n.master);
     h1.start(now);h1.stop(now+0.55);h2.start(now);h2.stop(now+0.55);
   }
+  function playCheer(){
+    if(!started||muted)return;
+    var now=ctx.currentTime;
+    /* kids cheering — layered bright tones + noise burst */
+    for(var ci=0;ci<5;ci++){
+      var o=ctx.createOscillator();o.type="triangle";
+      o.frequency.value=600+Math.random()*800;
+      var cg=ctx.createGain();cg.gain.setValueAtTime(0.001,now+ci*0.04);
+      cg.gain.linearRampToValueAtTime(0.04+Math.random()*0.03,now+ci*0.04+0.08);
+      cg.gain.exponentialRampToValueAtTime(0.001,now+0.6+Math.random()*0.3);
+      o.connect(cg);cg.connect(n.master);
+      o.start(now+ci*0.04);o.stop(now+1);
+    }
+    /* clapping noise bursts */
+    for(var ci2=0;ci2<4;ci2++){
+      var nb=ctx.createBufferSource();var buf=ctx.createBuffer(1,ctx.sampleRate*0.06,ctx.sampleRate);
+      var d2=buf.getChannelData(0);for(var si2=0;si2<d2.length;si2++)d2[si2]=(Math.random()*2-1)*0.8;
+      nb.buffer=buf;var ng=ctx.createGain();ng.gain.value=0.06;
+      var nf=ctx.createBiquadFilter();nf.type="bandpass";nf.frequency.value=2000+ci2*500;nf.Q.value=1;
+      nb.connect(nf);nf.connect(ng);ng.connect(n.master);
+      nb.start(now+ci2*0.12+0.05);
+    }
+    /* rising "yay" tone */
+    var yay=ctx.createOscillator();yay.type="sine";
+    yay.frequency.setValueAtTime(400,now);yay.frequency.linearRampToValueAtTime(900,now+0.3);
+    var yg=ctx.createGain();yg.gain.setValueAtTime(0.05,now);
+    yg.gain.linearRampToValueAtTime(0.08,now+0.15);
+    yg.gain.exponentialRampToValueAtTime(0.001,now+0.5);
+    yay.connect(yg);yg.connect(n.master);yay.start(now);yay.stop(now+0.5);
+  }
   function dispose(){if(ctx){ctx.close();ctx=null;started=false;}}
 
   return{init:init,updateEngine:updateEngine,updateMusic:updateMusic,
-    playCrash:playCrash,playDoor:playDoor,playBell:playBell,playHorn:playHorn,
+    playCrash:playCrash,playDoor:playDoor,playBell:playBell,playHorn:playHorn,playCheer:playCheer,
     setMute:setMute,getMuted:getMuted,dispose:dispose};
 }
 
@@ -649,10 +679,20 @@ function generateSmoothRoad(waypoints){
   return result;
 }
 var smoothR=generateSmoothRoad(R);
-function newPax(){
-  var p=[];
-  for(var i=0;i<STOPS.length-1;i++){var c=1+Math.floor(Math.random()*3);
-    for(var j=0;j<c;j++){var d2=i+1+Math.floor(Math.random()*(STOPS.length-i-1));
+/* difficulty: "easy"=ages 4-5 (add only, 1-2 per stop), "medium"=ages 6-7 (add/sub, 1-3), "hard"=ages 8+ (bigger, 2-4) */
+function newPax(difficulty){
+  var p=[];var maxPerStop=difficulty==="easy"?2:difficulty==="medium"?3:4;
+  var minPerStop=difficulty==="hard"?2:1;
+  for(var i=0;i<STOPS.length-1;i++){var c=minPerStop+Math.floor(Math.random()*maxPerStop);
+    if(difficulty==="easy")c=Math.min(c,2);
+    for(var j=0;j<c;j++){
+      var d2;
+      if(difficulty==="easy"){
+        /* easy: passengers only go to the very next stop (addition only, no subtraction mix) */
+        d2=i+1;
+      }else{
+        d2=i+1+Math.floor(Math.random()*(STOPS.length-i-1));
+      }
       p.push({origin:i,dest:Math.min(d2,STOPS.length-1),on:false,done:false});}}
   return p;
 }
@@ -671,6 +711,11 @@ export default function App(){
   var [muted,setMuted]=useState(false);
   var [mathInput,setMathInput]=useState("");
   var [mathWrong,setMathWrong]=useState(false);
+  var [difficulty,setDifficulty]=useState("medium");
+  var diffRef=useRef("medium");
+  var [mathStreak,setMathStreak]=useState(0);
+
+  function setDiff(d){setDifficulty(d);diffRef.current=d;}
 
   /* init audio on first interaction */
   function ensureAudio(){
@@ -1112,7 +1157,7 @@ export default function App(){
 
     /* ══ GAME STATE ══ */
     var g={
-      speed:0,heading:initAng,steer:0,pax:newPax(),onBus:0,delivered:0,score:0,
+      speed:0,heading:initAng,steer:0,pax:newPax(diffRef.current),onBus:0,delivered:0,score:0,
       nearIdx:-1,stoppedIdx:-1,time:0,nextWp:1,visited:{},
       crashed:false,crashTimer:0,damage:0,camShake:0,
       prevX:R[0][0],prevZ:R[0][1],obstacles:obstacles,
@@ -1128,7 +1173,7 @@ export default function App(){
     var camLk=new THREE.Vector3(bus.position.x,2.5,bus.position.z);
 
     g.reset=function(){
-      g.pax=newPax();g.speed=0;g.steer=0;g.onBus=0;g.delivered=0;g.score=0;
+      g.pax=newPax(diffRef.current);g.speed=0;g.steer=0;g.onBus=0;g.delivered=0;g.score=0;
       g.nearIdx=-1;g.stoppedIdx=-1;g.time=0;g.nextWp=1;g.visited={};
       g.crashed=false;g.crashTimer=0;g.damage=0;g.camShake=0;
       g.mathSolved=true;g.mathPrev=0;
@@ -1392,6 +1437,7 @@ export default function App(){
     ensureAudio();
     if(gRef.current)gRef.current.reset();
     stateRef.current="playing";
+    setMathStreak(0);setMathInput("");setMathWrong(false);
     setUi(function(prev){return Object.assign({},prev,{phase:"playing",crashed:false,damage:0});});
   },[]);
 
@@ -1410,11 +1456,12 @@ export default function App(){
     var correct=ui.mathPrev-ui.bOff+ui.bOn;
     if(answer===correct){
       g2.mathSolved=true;
-      if(audioRef.current)audioRef.current.playBell();
+      if(audioRef.current)audioRef.current.playCheer();
+      setMathStreak(function(s){return s+1;});
       setUi(function(prev){return Object.assign({},prev,{mathSolved:true});});
       setMathInput("");setMathWrong(false);
     }else{
-      setMathWrong(true);
+      setMathWrong(true);setMathStreak(0);
       setTimeout(function(){setMathWrong(false);},600);
     }
   }
@@ -1449,7 +1496,7 @@ export default function App(){
             <div style={{fontSize:68,marginBottom:4}}>🚌</div>
             <h1 style={{fontSize:42,margin:"0 0 2px",letterSpacing:5,color:"#e8b400"}}>BUS ROUTE 3D</h1>
             <p style={{color:"#556",fontSize:11,margin:"0 0 28px",letterSpacing:3}}>CITY TRANSIT SIMULATOR</p>
-            <div style={{background:"rgba(0,0,0,0.5)",borderRadius:12,padding:"20px 28px",marginBottom:28,
+            <div style={{background:"rgba(0,0,0,0.5)",borderRadius:12,padding:"20px 28px",marginBottom:20,
               textAlign:"left",lineHeight:"2.1em",fontSize:13,border:"1px solid rgba(255,255,255,0.06)"}}>
               <div style={{color:"#e8b400",fontWeight:"bold",marginBottom:8,fontSize:13,letterSpacing:2}}>CONTROLS</div>
               <div><span style={{color:"#ff8c00",display:"inline-block",width:75}}>W / ↑</span> Accelerate</div>
@@ -1462,6 +1509,25 @@ export default function App(){
                 Follow blue arrows. Stop at green rings to pick up passengers. 100 pts per delivery.
               </div>
               <div style={{marginTop:6,color:"#6a8",fontSize:11}}>🔊 Engine sounds, music &amp; SFX included</div>
+            </div>
+            <div style={{background:"rgba(0,0,0,0.5)",borderRadius:12,padding:"16px 28px",marginBottom:24,
+              border:"1px solid rgba(255,255,255,0.06)"}}>
+              <div style={{color:"#e8b400",fontWeight:"bold",marginBottom:12,fontSize:13,letterSpacing:2}}>MATHS DIFFICULTY</div>
+              <div style={{display:"flex",gap:8,justifyContent:"center"}}>
+                {[["easy","Ages 4-5","Small numbers, adding only"],
+                  ["medium","Ages 6-7","Adding & subtracting"],
+                  ["hard","Ages 8+","Bigger numbers"]].map(function(d){
+                  return(<button key={d[0]} onClick={function(){setDiff(d[0]);}}
+                    style={{flex:1,padding:"10px 8px",borderRadius:8,cursor:"pointer",
+                      fontFamily:"'Courier New',monospace",textAlign:"center",
+                      background:difficulty===d[0]?"rgba(232,180,0,0.25)":"rgba(255,255,255,0.05)",
+                      border:difficulty===d[0]?"2px solid #e8b400":"2px solid rgba(255,255,255,0.1)",
+                      color:difficulty===d[0]?"#e8b400":"#888",transition:"all 0.2s"}}>
+                    <div style={{fontSize:13,fontWeight:"bold"}}>{d[1]}</div>
+                    <div style={{fontSize:9,marginTop:3,opacity:0.7}}>{d[2]}</div>
+                  </button>);
+                })}
+              </div>
             </div>
             <button onClick={startPlay} style={{
               background:"linear-gradient(135deg,#e8b400,#ff6b00)",border:"none",color:"#111",
@@ -1560,51 +1626,63 @@ export default function App(){
           )}
 
           {phase==="stopped"&&(
-            <div style={{position:"absolute",bottom:75,left:"50%",transform:"translateX(-50%)",
-              background:"rgba(0,0,0,0.9)",borderRadius:13,padding:"18px 30px",
-              border:ui.mathSolved?"2px solid #2ecc71":"2px solid #e8b400",
-              textAlign:"center",minWidth:260,backdropFilter:"blur(8px)",pointerEvents:"auto"}}>
-              <div style={{color:"#2ecc71",fontSize:15,fontWeight:"bold",marginBottom:10}}>🚏 {ui.stopN}</div>
-              {ui.bOff===0&&ui.bOn===0?(
-                <div>
-                  <div style={{color:"#777",fontSize:12,marginBottom:8}}>No passengers here</div>
-                  <div style={{color:"#e8b400",fontSize:11}}>Press SPACE to close doors</div>
-                </div>
-              ):!ui.mathSolved?(
-                <div>
-                  <div style={{color:"#aac",fontSize:13,marginBottom:6}}>🚌 You had <span style={{color:"#f39c12",fontWeight:"bold",fontSize:16}}>{ui.mathPrev}</span> on the bus</div>
-                  <div style={{display:"flex",justifyContent:"center",gap:20,marginBottom:10}}>
-                    {ui.bOff>0&&<div style={{color:"#e74c3c",fontSize:15,fontWeight:"bold"}}>⬇ {ui.bOff} got off</div>}
-                    {ui.bOn>0&&<div style={{color:"#2ecc71",fontSize:15,fontWeight:"bold"}}>⬆ {ui.bOn} got on</div>}
+            <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",
+              background:"rgba(0,0,0,0.4)",pointerEvents:"auto"}}>
+              <div style={{background:"rgba(10,15,30,0.95)",borderRadius:20,padding:"32px 44px",
+                border:ui.mathSolved?"3px solid #2ecc71":"3px solid #e8b400",
+                textAlign:"center",minWidth:360,maxWidth:480,backdropFilter:"blur(12px)",
+                boxShadow:"0 0 60px rgba(0,0,0,0.5)"}}>
+                <div style={{color:"#2ecc71",fontSize:20,fontWeight:"bold",marginBottom:16}}>🚏 {ui.stopN}</div>
+                {ui.bOff===0&&ui.bOn===0?(
+                  <div>
+                    <div style={{color:"#888",fontSize:18,marginBottom:12}}>No passengers at this stop</div>
+                    <div style={{color:"#e8b400",fontSize:14}}>Press SPACE to close doors</div>
                   </div>
-                  <div style={{color:"#e8b400",fontSize:14,fontWeight:"bold",marginBottom:8}}>How many are on the bus now?</div>
-                  <div style={{display:"flex",justifyContent:"center",gap:8,alignItems:"center"}}>
-                    <input type="number" inputMode="numeric" pattern="[0-9]*" value={mathInput}
-                      onChange={function(e){setMathInput(e.target.value);}}
-                      onKeyDown={function(e){e.stopPropagation();if(e.key==="Enter")checkMath();}}
-                      autoFocus
-                      style={{width:64,padding:"8px 10px",fontSize:20,fontWeight:"bold",textAlign:"center",
-                        borderRadius:8,border:mathWrong?"2px solid #e74c3c":"2px solid #e8b400",
-                        background:"rgba(255,255,255,0.1)",color:"#fff",outline:"none",
-                        fontFamily:"'Courier New',monospace",
-                        animation:mathWrong?"shake 0.4s ease":"none"}} />
-                    <button onClick={checkMath} style={{padding:"8px 16px",fontSize:14,fontWeight:"bold",
-                      borderRadius:8,border:"none",cursor:"pointer",
-                      background:"linear-gradient(135deg,#e8b400,#ff6b00)",color:"#111",
-                      fontFamily:"'Courier New',monospace"}}>Check</button>
+                ):!ui.mathSolved?(
+                  <div>
+                    <div style={{background:"rgba(255,255,255,0.06)",borderRadius:14,padding:"20px 24px",marginBottom:20}}>
+                      <div style={{color:"#aac",fontSize:16,marginBottom:14}}>🚌 Passengers on the bus:</div>
+                      <div style={{fontSize:52,fontWeight:"bold",color:"#f39c12",lineHeight:1,marginBottom:16}}>{ui.mathPrev}</div>
+                      <div style={{display:"flex",justifyContent:"center",gap:28,marginBottom:4}}>
+                        {ui.bOff>0&&<div style={{background:"rgba(231,76,60,0.15)",borderRadius:10,padding:"10px 20px"}}>
+                          <div style={{fontSize:36,fontWeight:"bold",color:"#e74c3c"}}>{ui.bOff}</div>
+                          <div style={{color:"#e74c3c",fontSize:13,fontWeight:"bold",marginTop:2}}>got off</div>
+                        </div>}
+                        {ui.bOn>0&&<div style={{background:"rgba(46,204,113,0.15)",borderRadius:10,padding:"10px 20px"}}>
+                          <div style={{fontSize:36,fontWeight:"bold",color:"#2ecc71"}}>{ui.bOn}</div>
+                          <div style={{color:"#2ecc71",fontSize:13,fontWeight:"bold",marginTop:2}}>got on</div>
+                        </div>}
+                      </div>
+                    </div>
+                    <div style={{color:"#e8b400",fontSize:22,fontWeight:"bold",marginBottom:14}}>How many are on the bus now?</div>
+                    <div style={{display:"flex",justifyContent:"center",gap:10,alignItems:"center"}}>
+                      <input type="number" inputMode="numeric" pattern="[0-9]*" value={mathInput}
+                        onChange={function(e){setMathInput(e.target.value);}}
+                        onKeyDown={function(e){e.stopPropagation();if(e.key==="Enter")checkMath();}}
+                        autoFocus
+                        style={{width:90,padding:"12px 14px",fontSize:32,fontWeight:"bold",textAlign:"center",
+                          borderRadius:10,border:mathWrong?"3px solid #e74c3c":"3px solid #e8b400",
+                          background:"rgba(255,255,255,0.1)",color:"#fff",outline:"none",
+                          fontFamily:"'Courier New',monospace",
+                          animation:mathWrong?"shake 0.4s ease":"none"}} />
+                      <button onClick={checkMath} style={{padding:"14px 24px",fontSize:18,fontWeight:"bold",
+                        borderRadius:10,border:"none",cursor:"pointer",
+                        background:"linear-gradient(135deg,#e8b400,#ff6b00)",color:"#111",
+                        fontFamily:"'Courier New',monospace"}}>Check</button>
+                    </div>
+                    {mathWrong&&<div style={{color:"#e74c3c",fontSize:16,fontWeight:"bold",marginTop:10}}>Not quite! Try again</div>}
                   </div>
-                  {mathWrong&&<div style={{color:"#e74c3c",fontSize:12,marginTop:6}}>Not quite! Try again</div>}
-                </div>
-              ):(
-                <div>
-                  <div style={{display:"flex",justifyContent:"center",gap:20,marginBottom:6}}>
-                    {ui.bOff>0&&<div style={{color:"#e74c3c",fontSize:15,fontWeight:"bold"}}>⬇ {ui.bOff} got off</div>}
-                    {ui.bOn>0&&<div style={{color:"#2ecc71",fontSize:15,fontWeight:"bold"}}>⬆ {ui.bOn} got on</div>}
+                ):(
+                  <div>
+                    <div style={{fontSize:48,marginBottom:8}}>🎉</div>
+                    <div style={{color:"#2ecc71",fontSize:28,fontWeight:"bold",marginBottom:8}}>Correct!</div>
+                    <div style={{fontSize:42,fontWeight:"bold",color:"#f39c12",marginBottom:6}}>{ui.mathPrev-ui.bOff+ui.bOn}</div>
+                    <div style={{color:"#aac",fontSize:15,marginBottom:4}}>passengers on the bus</div>
+                    {mathStreak>1&&<div style={{color:"#ff8c00",fontSize:14,fontWeight:"bold",marginBottom:6}}>{mathStreak} in a row!</div>}
+                    <div style={{color:"#e8b400",fontSize:13,marginTop:10}}>Press SPACE to close doors &amp; continue</div>
                   </div>
-                  <div style={{color:"#2ecc71",fontSize:16,fontWeight:"bold",marginBottom:6}}>Correct! {ui.mathPrev-ui.bOff+ui.bOn} passengers on the bus</div>
-                  <div style={{color:"#e8b400",fontSize:11}}>Press SPACE to close doors &amp; continue</div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           )}
 
