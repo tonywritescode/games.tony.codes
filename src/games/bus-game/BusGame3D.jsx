@@ -766,24 +766,38 @@ export default function App(){
     var curbMat=new THREE.MeshStandardMaterial({color:0x777777,roughness:0.7});
     var roadGeos=[],swalkGeos=[],curbGeos=[],dashGeos=[],edgeGeos=[],arrowGeos=[];
 
-    for(i=0;i<smoothR.length-1;i++){
-      a=smoothR[i];b=smoothR[i+1];dx=b[0]-a[0];dz=b[1]-a[1];
-      len=Math.sqrt(dx*dx+dz*dz);cx=(a[0]+b[0])/2;cz=(a[1]+b[1])/2;ang=Math.atan2(dx,dz);
-      var rg=new THREE.BoxGeometry(14,0.15,len+0.5);rg.rotateY(ang);rg.translate(cx,0.07,cz);roadGeos.push(rg);
-      for(s=-1;s<=1;s+=2){
-        var sg=new THREE.BoxGeometry(2.5,0.28,len+0.5);sg.rotateY(ang);
-        sg.translate(cx+Math.cos(ang)*s*8.5,0.14,cz-Math.sin(ang)*s*8.5);swalkGeos.push(sg);
-        var kg=new THREE.BoxGeometry(0.3,0.25,len+0.5);kg.rotateY(ang);
-        kg.translate(cx+Math.cos(ang)*s*7.2,0.12,cz-Math.sin(ang)*s*7.2);curbGeos.push(kg);
+    /* build continuous ribbon geometry along spline — no seams at curves */
+    function buildRibbon(pts,off,hw,y){
+      var pos=[],idx=[],n=pts.length;
+      for(var ri2=0;ri2<n;ri2++){
+        var tx,tz;
+        if(ri2===0){tx=pts[1][0]-pts[0][0];tz=pts[1][1]-pts[0][1];}
+        else if(ri2===n-1){tx=pts[ri2][0]-pts[ri2-1][0];tz=pts[ri2][1]-pts[ri2-1][1];}
+        else{tx=pts[ri2+1][0]-pts[ri2-1][0];tz=pts[ri2+1][1]-pts[ri2-1][1];}
+        var tl=Math.sqrt(tx*tx+tz*tz);
+        if(tl>0.001){tx/=tl;tz/=tl;}
+        var px=-tz,pz=tx;
+        var cx2=pts[ri2][0]+px*off,cz2=pts[ri2][1]+pz*off;
+        pos.push(cx2+px*hw,y,cz2+pz*hw, cx2-px*hw,y,cz2-pz*hw);
+        if(ri2>0){var v=(ri2-1)*2;idx.push(v,v+2,v+1,v+1,v+2,v+3);}
       }
-      if(i%3===0){var dg=new THREE.BoxGeometry(0.3,0.16,2.2);dg.rotateY(ang);
-        dg.translate(cx,0.16,cz);dashGeos.push(dg);}
-      for(s=-1;s<=1;s+=2){
-        var eg=new THREE.BoxGeometry(0.2,0.16,len+0.3);eg.rotateY(ang);
-        eg.translate(cx+Math.cos(ang)*s*6,0.16,cz-Math.sin(ang)*s*6);edgeGeos.push(eg);}
+      var geo=new THREE.BufferGeometry();
+      geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+      geo.setIndex(idx);geo.computeVertexNormals();return geo;
     }
-    for(i=0;i<R.length;i++){
-      var jg=new THREE.CylinderGeometry(7,7,0.15,16);jg.translate(R[i][0],0.07,R[i][1]);roadGeos.push(jg);}
+    roadGeos.push(buildRibbon(smoothR,0,7,0.15));
+    for(s=-1;s<=1;s+=2){
+      swalkGeos.push(buildRibbon(smoothR,s*8.5,1.25,0.28));
+      curbGeos.push(buildRibbon(smoothR,s*7.2,0.15,0.25));
+      edgeGeos.push(buildRibbon(smoothR,s*6,0.1,0.16));
+    }
+    /* center dashes */
+    for(i=0;i<smoothR.length-1;i++){
+      if(i%3!==0)continue;
+      a=smoothR[i];b=smoothR[i+1];dx=b[0]-a[0];dz=b[1]-a[1];ang=Math.atan2(dx,dz);
+      var dg=new THREE.BoxGeometry(0.3,0.16,2.2);dg.rotateY(ang);
+      dg.translate((a[0]+b[0])/2,0.16,(a[1]+b[1])/2);dashGeos.push(dg);
+    }
 
     /* route arrows */
     var arMat=new THREE.MeshStandardMaterial({color:0x00aaff,transparent:true,opacity:0.3,emissive:0x0066aa,emissiveIntensity:0.3});
@@ -936,7 +950,14 @@ export default function App(){
     for(var si=0;si<STOPS.length;si++){
       var stop=STOPS[si],wp=R[stop.i];
       var nx=0,nz2=0;
-      if(stop.i<R.length-1){var nxt=R[stop.i+1],ddx=nxt[0]-wp[0],ddz=nxt[1]-wp[1],ll=Math.sqrt(ddx*ddx+ddz*ddz);
+      if(stop.i>0&&stop.i<R.length-1){
+        var prev=R[stop.i-1],nxt=R[stop.i+1];
+        var dx1=wp[0]-prev[0],dz1=wp[1]-prev[1],dx2=nxt[0]-wp[0],dz2=nxt[1]-wp[1];
+        var ll1=Math.sqrt(dx1*dx1+dz1*dz1),ll2=Math.sqrt(dx2*dx2+dz2*dz2);
+        if(ll1>0.01){dx1/=ll1;dz1/=ll1;}if(ll2>0.01){dx2/=ll2;dz2/=ll2;}
+        var adx=(dx1+dx2)/2,adz=(dz1+dz2)/2,all=Math.sqrt(adx*adx+adz*adz);
+        if(all>0.01){nx=-adz/all;nz2=adx/all;}
+      }else if(stop.i<R.length-1){var nxt2=R[stop.i+1],ddx=nxt2[0]-wp[0],ddz=nxt2[1]-wp[1],ll=Math.sqrt(ddx*ddx+ddz*ddz);
         if(ll>0.01){nx=-ddz/ll;nz2=ddx/ll;}}
       var sx=wp[0]+nx*12,sz=wp[1]+nz2*12;
       stopPositions.push({sx:sx,sz:sz,nx:nx,nz:nz2});
