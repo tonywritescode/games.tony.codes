@@ -987,7 +987,7 @@ export default function App(){
         if(bOn>0&&audioRef.current)audioRef.current.playBell();
         g.mathPrev=previousOnBus;
         g.mathSolved=(bOn===0&&bOff===0);
-        setMathInput("");setMathWrong(false);
+        setMathStreak(0);setMathInput("");setMathWrong(false);
         if(ssi===STOPS.length-1){
           /* terminal: finish animations instantly */
           for(var ai3=alightFigs.length-1;ai3>=0;ai3--){
@@ -1228,6 +1228,7 @@ export default function App(){
       if(audioRef.current){audioRef.current.playCheer();audioRef.current.playBell();}
       setMathStreak(function(s){return s+1;});
       setUi(function(prev){return Object.assign({},prev,{mathSolved:true});});
+      setMathStreak(function(s){return s+1;});
       setMathInput("");setMathWrong(false);
     }else{
       setMathWrong(true);setMathStreak(0);
