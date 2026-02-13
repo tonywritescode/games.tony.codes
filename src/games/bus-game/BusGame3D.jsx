@@ -185,228 +185,18 @@ function createAudio(){
     tyreSrc.start();
     n.tyreGain=tyreGain;n.tyreFilt=tyreFilt;
 
-    /* ═══ MUSIC ENGINE - Lo-fi Chill Step Sequencer ═══ */
-    var BPM=75;
-    var stepDur=60/BPM/4; /* 16th note duration */
-    var barDur=stepDur*16;
+    /* ═══ MUSIC ENGINE - Real Audio File Playback ═══ */
     var musicBus=ctx.createGain();
     musicBus.gain.value=0.45;
-    /* lo-fi warmth filter */
-    var lofi=ctx.createBiquadFilter();
-    lofi.type="lowpass";lofi.frequency.value=3500;lofi.Q.value=0.7;
-    /* slight saturation via waveshaper */
-    var warmth=ctx.createWaveShaper();
-    var wLen2=2048,wCurve2=new Float32Array(wLen2);
-    for(i=0;i<wLen2;i++){var x2=i*2/wLen2-1;wCurve2[i]=Math.tanh(x2*1.2);}
-    warmth.curve=wCurve2;
-    musicBus.connect(warmth);warmth.connect(lofi);lofi.connect(master);
+    musicBus.connect(master);
     n.musicBus=musicBus;
+    n.musicSrc=null;
+    n.musicBuf=null;
+    n.cheerBuf=null;
 
-    /* vinyl crackle */
-    var crackleLen=ctx.sampleRate*4;
-    var crackleBuf=ctx.createBuffer(1,crackleLen,ctx.sampleRate);
-    var crackleData=crackleBuf.getChannelData(0);
-    for(i=0;i<crackleLen;i++){
-      crackleData[i]=Math.random()>0.997?(Math.random()*2-1)*0.4:
-                     Math.random()>0.99?(Math.random()*2-1)*0.08:0;
-    }
-    var crackleSrc=ctx.createBufferSource();
-    crackleSrc.buffer=crackleBuf;crackleSrc.loop=true;
-    var crackleG=ctx.createGain();crackleG.gain.value=0.06;
-    var crackleF=ctx.createBiquadFilter();crackleF.type="highpass";crackleF.frequency.value=1000;
-    crackleSrc.connect(crackleF);crackleF.connect(crackleG);crackleG.connect(musicBus);
-    crackleSrc.start();
-
-    /* ── note frequency helper ── */
-    function noteHz(note,oct){
-      var semis={C:0,Cs:1,D:2,Ds:3,E:4,F:5,Fs:6,G:7,Gs:8,A:9,As:10,B:11};
-      return 440*Math.pow(2,(semis[note]+(oct-4)*12-9)/12);
-    }
-
-    /* ── DRUM PATTERNS (16 steps per bar, 4 bars loop) ── */
-    /* K=kick, S=snare, H=closed hat, O=open hat */
-    var drumPats=[
-      /* bar 0 */ "K--H--SH-K-H--SH",
-      /* bar 1 */ "K--H--SH-K-H-OSH",
-      /* bar 2 */ "K--H--SH-K-H--SH",
-      /* bar 3 */ "K-KH--SH-K-HKOSH",
-    ];
-
-    /* ── CHORD PROGRESSION (each bar) ── */
-    var chordProg=[
-      {root:"C",notes:[noteHz("C",4),noteHz("E",4),noteHz("G",4),noteHz("B",4)]},    /* Cmaj7 */
-      {root:"A",notes:[noteHz("A",3),noteHz("C",4),noteHz("E",4),noteHz("G",4)]},    /* Am7 */
-      {root:"D",notes:[noteHz("D",4),noteHz("F",4),noteHz("A",4),noteHz("C",5)]},    /* Dm7 */
-      {root:"G",notes:[noteHz("G",3),noteHz("B",3),noteHz("D",4),noteHz("F",4)]},    /* G7 */
-    ];
-
-    /* ── BASS PATTERN (per chord, 16 steps) ── */
-    /* 0=rest, 1=root, 3=3rd, 5=5th, 8=octave up */
-    var bassPats=[
-      [1,0,0,0,5,0,0,3,0,1,0,0,8,0,5,0],
-      [1,0,0,5,0,0,3,0,1,0,0,0,5,0,0,3],
-      [1,0,0,0,3,0,5,0,0,1,0,0,5,0,3,0],
-      [1,0,5,0,0,3,0,0,1,0,0,5,0,0,8,0],
-    ];
-    var bassRoots=[noteHz("C",2),noteHz("A",1),noteHz("D",2),noteHz("G",1)];
-    var bassIntervals={1:1, 3:1.1892, 5:1.4983, 8:2}; /* rough intervals */
-
-    /* ── MELODY (16 steps per bar, 0=rest, Hz value = play) ── */
-    var melPats=[
-      [0,0,noteHz("E",5),0, noteHz("G",5),0,0,noteHz("B",5), 0,noteHz("A",5),0,0, noteHz("G",5),0,noteHz("E",5),0],
-      [0,0,noteHz("C",5),0, 0,noteHz("E",5),0,0, noteHz("A",5),0,noteHz("G",5),0, 0,0,noteHz("E",5),0],
-      [0,noteHz("D",5),0,0, noteHz("F",5),0,noteHz("A",5),0, 0,0,noteHz("C",6),0, noteHz("A",5),0,0,0],
-      [0,0,noteHz("B",4),0, noteHz("D",5),0,0,noteHz("F",5), 0,noteHz("D",5),0,0, noteHz("B",4),0,0,0],
-    ];
-
-    n.seq={
-      BPM:BPM,stepDur:stepDur,barDur:barDur,
-      drumPats:drumPats,chordProg:chordProg,
-      bassPats:bassPats,bassRoots:bassRoots,bassIntervals:bassIntervals,
-      melPats:melPats,
-      currentBar:-1, nextBarTime:0, playing:false
-    };
-
-    /* ── instrument synth functions ── */
-    n.playKick=function(time){
-      var o=ctx.createOscillator();o.type="sine";
-      o.frequency.setValueAtTime(150,time);
-      o.frequency.exponentialRampToValueAtTime(30,time+0.12);
-      var g=ctx.createGain();
-      g.gain.setValueAtTime(0.55,time);
-      g.gain.exponentialRampToValueAtTime(0.001,time+0.35);
-      /* click transient */
-      var click=ctx.createOscillator();click.type="square";
-      click.frequency.setValueAtTime(800,time);
-      var cg=ctx.createGain();
-      cg.gain.setValueAtTime(0.15,time);
-      cg.gain.exponentialRampToValueAtTime(0.001,time+0.015);
-      o.connect(g);g.connect(musicBus);
-      click.connect(cg);cg.connect(musicBus);
-      o.start(time);o.stop(time+0.4);
-      click.start(time);click.stop(time+0.02);
-    };
-
-    n.playSnare=function(time){
-      /* body */
-      var o=ctx.createOscillator();o.type="triangle";
-      o.frequency.setValueAtTime(200,time);
-      o.frequency.exponentialRampToValueAtTime(120,time+0.06);
-      var og=ctx.createGain();
-      og.gain.setValueAtTime(0.25,time);
-      og.gain.exponentialRampToValueAtTime(0.001,time+0.12);
-      o.connect(og);og.connect(musicBus);
-      o.start(time);o.stop(time+0.15);
-      /* noise */
-      var nLen=Math.floor(ctx.sampleRate*0.2);
-      var nBuf=ctx.createBuffer(1,nLen,ctx.sampleRate);
-      var nD=nBuf.getChannelData(0);
-      for(var j=0;j<nLen;j++)nD[j]=(Math.random()*2-1);
-      var ns=ctx.createBufferSource();ns.buffer=nBuf;
-      var ng=ctx.createGain();
-      ng.gain.setValueAtTime(0.22,time);
-      ng.gain.exponentialRampToValueAtTime(0.001,time+0.18);
-      var nf=ctx.createBiquadFilter();nf.type="highpass";nf.frequency.value=1200;
-      ns.connect(nf);nf.connect(ng);ng.connect(musicBus);
-      ns.start(time);ns.stop(time+0.2);
-    };
-
-    n.playHihat=function(time,open){
-      var nLen=Math.floor(ctx.sampleRate*(open?0.3:0.08));
-      var nBuf=ctx.createBuffer(1,nLen,ctx.sampleRate);
-      var nD=nBuf.getChannelData(0);
-      for(var j=0;j<nLen;j++)nD[j]=(Math.random()*2-1);
-      var ns=ctx.createBufferSource();ns.buffer=nBuf;
-      var ng=ctx.createGain();
-      ng.gain.setValueAtTime(open?0.1:0.08,time);
-      ng.gain.exponentialRampToValueAtTime(0.001,time+(open?0.28:0.06));
-      var nf=ctx.createBiquadFilter();nf.type="highpass";nf.frequency.value=6000;
-      var nf2=ctx.createBiquadFilter();nf2.type="bandpass";nf2.frequency.value=10000;nf2.Q.value=1;
-      ns.connect(nf);nf.connect(nf2);nf2.connect(ng);ng.connect(musicBus);
-      ns.start(time);ns.stop(time+(open?0.35:0.1));
-    };
-
-    n.playBass=function(time,freq){
-      var o=ctx.createOscillator();o.type="sawtooth";
-      o.frequency.setValueAtTime(freq,time);
-      var g=ctx.createGain();
-      g.gain.setValueAtTime(0.28,time);
-      g.gain.setValueAtTime(0.28,time+stepDur*0.7);
-      g.gain.exponentialRampToValueAtTime(0.001,time+stepDur*0.95);
-      var f=ctx.createBiquadFilter();f.type="lowpass";f.frequency.value=250;f.Q.value=3;
-      o.connect(f);f.connect(g);g.connect(musicBus);
-      o.start(time);o.stop(time+stepDur);
-    };
-
-    n.playPad=function(time,freqs,dur){
-      for(var j=0;j<freqs.length;j++){
-        var o=ctx.createOscillator();o.type=j%2===0?"triangle":"sine";
-        o.frequency.setValueAtTime(freqs[j],time);
-        /* slight detune for richness */
-        o.detune.setValueAtTime((Math.random()-0.5)*12,time);
-        var g=ctx.createGain();
-        g.gain.setValueAtTime(0.001,time);
-        g.gain.linearRampToValueAtTime(0.08,time+0.3);
-        g.gain.setValueAtTime(0.08,time+dur-0.4);
-        g.gain.linearRampToValueAtTime(0.001,time+dur);
-        var pf=ctx.createBiquadFilter();pf.type="lowpass";
-        pf.frequency.setValueAtTime(800,time);
-        pf.frequency.linearRampToValueAtTime(1800,time+dur*0.5);
-        pf.frequency.linearRampToValueAtTime(600,time+dur);
-        pf.Q.value=1;
-        o.connect(pf);pf.connect(g);g.connect(musicBus);
-        o.start(time);o.stop(time+dur+0.1);
-      }
-    };
-
-    n.playMelody=function(time,freq){
-      var o=ctx.createOscillator();o.type="sine";
-      o.frequency.setValueAtTime(freq,time);
-      var o2=ctx.createOscillator();o2.type="triangle";
-      o2.frequency.setValueAtTime(freq,time);
-      o2.detune.setValueAtTime(7,time);
-      var g=ctx.createGain();
-      g.gain.setValueAtTime(0.001,time);
-      g.gain.linearRampToValueAtTime(0.09,time+0.03);
-      g.gain.exponentialRampToValueAtTime(0.001,time+stepDur*2);
-      var g2=ctx.createGain();
-      g2.gain.setValueAtTime(0.001,time);
-      g2.gain.linearRampToValueAtTime(0.04,time+0.04);
-      g2.gain.exponentialRampToValueAtTime(0.001,time+stepDur*2.5);
-      var mf=ctx.createBiquadFilter();mf.type="lowpass";mf.frequency.value=2500;mf.Q.value=0.5;
-      o.connect(g);o2.connect(g2);g.connect(mf);g2.connect(mf);mf.connect(musicBus);
-      o.start(time);o.stop(time+stepDur*3);
-      o2.start(time);o2.stop(time+stepDur*3);
-    };
-
-    n.scheduleBar=function(barIdx,startTime){
-      var bi=barIdx%4;
-      var dp=drumPats[bi];
-      var bp=bassPats[bi];
-      var mp=melPats[bi];
-      var ch=chordProg[bi];
-      var bRoot=bassRoots[bi];
-
-      /* schedule pad chord for the whole bar */
-      n.playPad(startTime,ch.notes,barDur);
-
-      for(var s=0;s<16;s++){
-        var t=startTime+s*stepDur;
-        /* drums */
-        var dc=dp[s];
-        if(dc==="K")n.playKick(t);
-        else if(dc==="S")n.playSnare(t);
-        else if(dc==="H")n.playHihat(t,false);
-        else if(dc==="O")n.playHihat(t,true);
-        /* bass */
-        if(bp[s]>0){
-          var bFreq=bRoot*(bassIntervals[bp[s]]||1);
-          n.playBass(t,bFreq);
-        }
-        /* melody */
-        if(mp[s]>0) n.playMelody(t,mp[s]);
-      }
-    };
+    /* load audio files */
+    fetch('/audio/cheer.mp3').then(function(r){return r.arrayBuffer();}).then(function(b){return ctx.decodeAudioData(b);}).then(function(buf){n.cheerBuf=buf;}).catch(function(){});
+    fetch('/audio/music.mp3').then(function(r){return r.arrayBuffer();}).then(function(b){return ctx.decodeAudioData(b);}).then(function(buf){n.musicBuf=buf;}).catch(function(){});
 
     started=true;
   }
@@ -458,22 +248,16 @@ function createAudio(){
     n.tyreFilt.frequency.setTargetAtTime(200+t*600,now,0.1);
   }
 
-  function updateMusic(dt){
-    if(!started||muted||!n.seq)return;
-    var seq=n.seq;
-    var now=ctx.currentTime;
-    /* schedule-ahead approach: always keep next bar queued */
-    if(!seq.playing){
-      seq.playing=true;
-      seq.nextBarTime=now+0.1;
-      seq.currentBar=0;
-      n.scheduleBar(0,seq.nextBarTime);
-    }
-    /* if we're close to the next bar, schedule it */
-    if(now>seq.nextBarTime-0.5){
-      seq.currentBar++;
-      seq.nextBarTime+=seq.barDur;
-      n.scheduleBar(seq.currentBar,seq.nextBarTime);
+  function updateMusic(){
+    if(!started||muted)return;
+    /* start looping music file once loaded */
+    if(!n.musicSrc&&n.musicBuf){
+      var src=ctx.createBufferSource();
+      src.buffer=n.musicBuf;
+      src.loop=true;
+      src.connect(n.musicBus);
+      src.start();
+      n.musicSrc=src;
     }
   }
 
@@ -583,7 +367,12 @@ function createAudio(){
     }
   }
 
-  function setMute(m){muted=m;if(n.master)n.master.gain.value=m?0:0.6;}
+  function setMute(m){
+    muted=m;
+    if(n.master)n.master.gain.value=m?0:0.6;
+    /* stop music source when muting so it restarts on unmute */
+    if(m&&n.musicSrc){try{n.musicSrc.stop();}catch(e){}n.musicSrc=null;}
+  }
   function getMuted(){return muted;}
   function playHorn(){
     if(!started||muted)return;
@@ -600,40 +389,23 @@ function createAudio(){
     h1.start(now);h1.stop(now+0.55);h2.start(now);h2.stop(now+0.55);
   }
   function playCheer(){
-    if(!started||muted)return;
-    var now=ctx.currentTime;
-    /* kids cheering — layered bright tones + noise burst */
-    for(var ci=0;ci<5;ci++){
-      var o=ctx.createOscillator();o.type="triangle";
-      o.frequency.value=600+Math.random()*800;
-      var cg=ctx.createGain();cg.gain.setValueAtTime(0.001,now+ci*0.04);
-      cg.gain.linearRampToValueAtTime(0.04+Math.random()*0.03,now+ci*0.04+0.08);
-      cg.gain.exponentialRampToValueAtTime(0.001,now+0.6+Math.random()*0.3);
-      o.connect(cg);cg.connect(n.master);
-      o.start(now+ci*0.04);o.stop(now+1);
-    }
-    /* clapping noise bursts */
-    for(var ci2=0;ci2<4;ci2++){
-      var nb=ctx.createBufferSource();var buf=ctx.createBuffer(1,ctx.sampleRate*0.06,ctx.sampleRate);
-      var d2=buf.getChannelData(0);for(var si2=0;si2<d2.length;si2++)d2[si2]=(Math.random()*2-1)*0.8;
-      nb.buffer=buf;var ng=ctx.createGain();ng.gain.value=0.06;
-      var nf=ctx.createBiquadFilter();nf.type="bandpass";nf.frequency.value=2000+ci2*500;nf.Q.value=1;
-      nb.connect(nf);nf.connect(ng);ng.connect(n.master);
-      nb.start(now+ci2*0.12+0.05);
-    }
-    /* rising "yay" tone */
-    var yay=ctx.createOscillator();yay.type="sine";
-    yay.frequency.setValueAtTime(400,now);yay.frequency.linearRampToValueAtTime(900,now+0.3);
-    var yg=ctx.createGain();yg.gain.setValueAtTime(0.05,now);
-    yg.gain.linearRampToValueAtTime(0.08,now+0.15);
-    yg.gain.exponentialRampToValueAtTime(0.001,now+0.5);
-    yay.connect(yg);yg.connect(n.master);yay.start(now);yay.stop(now+0.5);
+    if(!started||muted||!n.cheerBuf)return;
+    var src=ctx.createBufferSource();
+    src.buffer=n.cheerBuf;
+    var g=ctx.createGain();
+    g.gain.value=0.5;
+    src.connect(g);
+    g.connect(n.master);
+    src.start();
   }
-  function dispose(){if(ctx){ctx.close();ctx=null;started=false;}}
+  function dispose(){
+    if(n.musicSrc){try{n.musicSrc.stop();}catch(e){}}
+    if(ctx){ctx.close();ctx=null;started=false;}
+  }
 
   return{init:init,updateEngine:updateEngine,updateMusic:updateMusic,
-    playCrash:playCrash,playDoor:playDoor,playBell:playBell,playHorn:playHorn,playCheer:playCheer,
-    setMute:setMute,getMuted:getMuted,dispose:dispose};
+    playCrash:playCrash,playDoor:playDoor,playBell:playBell,playHorn:playHorn,
+    playCheer:playCheer,setMute:setMute,getMuted:getMuted,dispose:dispose};
 }
 
 /* ═══════════════════════════════════════
@@ -994,19 +766,14 @@ export default function App(){
 
     for(var si=0;si<STOPS.length;si++){
       var stop=STOPS[si],wp=R[stop.i];
+      /* compute average direction from incoming + outgoing segments for stable normal at corners */
+      var dirX=0,dirZ=0;
+      if(stop.i<R.length-1){var nxt=R[stop.i+1];dirX+=nxt[0]-wp[0];dirZ+=nxt[1]-wp[1];}
+      if(stop.i>0){var prv=R[stop.i-1];dirX+=wp[0]-prv[0];dirZ+=wp[1]-prv[1];}
+      var ll=Math.sqrt(dirX*dirX+dirZ*dirZ);
       var nx=0,nz2=0;
-      if(stop.i>0&&stop.i<R.length-1){
-        var prev=R[stop.i-1],nxt=R[stop.i+1];
-        var dx1=wp[0]-prev[0],dz1=wp[1]-prev[1],dx2=nxt[0]-wp[0],dz2=nxt[1]-wp[1];
-        var ll1=Math.sqrt(dx1*dx1+dz1*dz1),ll2=Math.sqrt(dx2*dx2+dz2*dz2);
-        if(ll1>0.01){dx1/=ll1;dz1/=ll1;}if(ll2>0.01){dx2/=ll2;dz2/=ll2;}
-        var adx=(dx1+dx2)/2,adz=(dz1+dz2)/2,all=Math.sqrt(adx*adx+adz*adz);
-        if(all>0.01){nx=-adz/all;nz2=adx/all;}
-      }else if(stop.i<R.length-1){var nxt2=R[stop.i+1],ddx=nxt2[0]-wp[0],ddz=nxt2[1]-wp[1],ll=Math.sqrt(ddx*ddx+ddz*ddz);
-        if(ll>0.01){nx=-ddz/ll;nz2=ddx/ll;}
-      }else if(stop.i>0){var prev2=R[stop.i-1],ddx2=wp[0]-prev2[0],ddz2=wp[1]-prev2[1],ll3=Math.sqrt(ddx2*ddx2+ddz2*ddz2);
-        if(ll3>0.01){nx=-ddz2/ll3;nz2=ddx2/ll3;}}
-      var sx=wp[0]+nx*12,sz=wp[1]+nz2*12;
+      if(ll>0.01){nx=-dirZ/ll;nz2=dirX/ll;}
+      var sx=wp[0]+nx*14,sz=wp[1]+nz2*14;
       stopPositions.push({sx:sx,sz:sz,nx:nx,nz:nz2});
       /* shelter */
       for(var ox=-1.5;ox<=1.5;ox+=3){m=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,3.2,8),pstMat);m.position.set(sx+ox,1.6,sz);m.castShadow=true;scene.add(m);}
@@ -1220,7 +987,7 @@ export default function App(){
         if(bOn>0&&audioRef.current)audioRef.current.playBell();
         g.mathPrev=previousOnBus;
         g.mathSolved=(bOn===0&&bOff===0);
-        setMathInput("");setMathWrong(false);
+        setMathStreak(0);setMathInput("");setMathWrong(false);
         if(ssi===STOPS.length-1){
           /* terminal: finish animations instantly */
           for(var ai3=alightFigs.length-1;ai3>=0;ai3--){
@@ -1458,9 +1225,10 @@ export default function App(){
     var correct=ui.mathPrev-ui.bOff+ui.bOn;
     if(answer===correct){
       g2.mathSolved=true;
-      if(audioRef.current)audioRef.current.playCheer();
+      if(audioRef.current){audioRef.current.playCheer();audioRef.current.playBell();}
       setMathStreak(function(s){return s+1;});
       setUi(function(prev){return Object.assign({},prev,{mathSolved:true});});
+      setMathStreak(function(s){return s+1;});
       setMathInput("");setMathWrong(false);
     }else{
       setMathWrong(true);setMathStreak(0);
