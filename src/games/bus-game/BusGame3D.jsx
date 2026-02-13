@@ -766,19 +766,14 @@ export default function App(){
 
     for(var si=0;si<STOPS.length;si++){
       var stop=STOPS[si],wp=R[stop.i];
+      /* compute average direction from incoming + outgoing segments for stable normal at corners */
+      var dirX=0,dirZ=0;
+      if(stop.i<R.length-1){var nxt=R[stop.i+1];dirX+=nxt[0]-wp[0];dirZ+=nxt[1]-wp[1];}
+      if(stop.i>0){var prv=R[stop.i-1];dirX+=wp[0]-prv[0];dirZ+=wp[1]-prv[1];}
+      var ll=Math.sqrt(dirX*dirX+dirZ*dirZ);
       var nx=0,nz2=0;
-      if(stop.i>0&&stop.i<R.length-1){
-        var prev=R[stop.i-1],nxt=R[stop.i+1];
-        var dx1=wp[0]-prev[0],dz1=wp[1]-prev[1],dx2=nxt[0]-wp[0],dz2=nxt[1]-wp[1];
-        var ll1=Math.sqrt(dx1*dx1+dz1*dz1),ll2=Math.sqrt(dx2*dx2+dz2*dz2);
-        if(ll1>0.01){dx1/=ll1;dz1/=ll1;}if(ll2>0.01){dx2/=ll2;dz2/=ll2;}
-        var adx=(dx1+dx2)/2,adz=(dz1+dz2)/2,all=Math.sqrt(adx*adx+adz*adz);
-        if(all>0.01){nx=-adz/all;nz2=adx/all;}
-      }else if(stop.i<R.length-1){var nxt2=R[stop.i+1],ddx=nxt2[0]-wp[0],ddz=nxt2[1]-wp[1],ll=Math.sqrt(ddx*ddx+ddz*ddz);
-        if(ll>0.01){nx=-ddz/ll;nz2=ddx/ll;}
-      }else if(stop.i>0){var prev2=R[stop.i-1],ddx2=wp[0]-prev2[0],ddz2=wp[1]-prev2[1],ll3=Math.sqrt(ddx2*ddx2+ddz2*ddz2);
-        if(ll3>0.01){nx=-ddz2/ll3;nz2=ddx2/ll3;}}
-      var sx=wp[0]+nx*12,sz=wp[1]+nz2*12;
+      if(ll>0.01){nx=-dirZ/ll;nz2=dirX/ll;}
+      var sx=wp[0]+nx*14,sz=wp[1]+nz2*14;
       stopPositions.push({sx:sx,sz:sz,nx:nx,nz:nz2});
       /* shelter */
       for(var ox=-1.5;ox<=1.5;ox+=3){m=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,3.2,8),pstMat);m.position.set(sx+ox,1.6,sz);m.castShadow=true;scene.add(m);}
