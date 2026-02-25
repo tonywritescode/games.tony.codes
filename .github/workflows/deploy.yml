@@ -8,7 +8,7 @@ on:
 
 env:
   APP_NAME: games
-  VPS_HOST: 72.61.16.250
+  VPS_HOST: 89.167.111.113
   PROD_DOMAIN: games.tony.codes
 
 jobs:
