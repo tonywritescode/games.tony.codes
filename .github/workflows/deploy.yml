@@ -15,7 +15,8 @@ jobs:
       app_name: games
       prod_domain: games.tony.codes
       health_endpoint: '/health.json'
-    secrets: inherit
+    secrets:
+      VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
 
   release:
     needs: deploy
