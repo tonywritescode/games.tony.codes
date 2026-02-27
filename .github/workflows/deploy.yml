@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   deploy:
-    uses: tonycodes/.github/.github/workflows/reusable-deploy.yml@main
+    uses: tonywritescode/.github/.github/workflows/reusable-deploy.yml@main
     with:
       app_name: games
       prod_domain: games.tony.codes
@@ -20,6 +20,6 @@ jobs:
 
   release:
     needs: deploy
-    uses: tonycodes/.github/.github/workflows/reusable-release.yml@main
+    uses: tonywritescode/.github/.github/workflows/reusable-release.yml@main
 
     secrets: inherit
